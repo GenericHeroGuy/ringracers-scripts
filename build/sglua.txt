@@ -1,0 +1,7 @@
+$basepath src/sglua/
+$output out/sglua.pk3
+
+# no dependencies or HUD hooks... yet :^)
+
+Lua/**
+**
