@@ -38,7 +38,7 @@ local tricking = {}
 
 addHook("MobjDamage", function(target, inflictor, source)
 	if target.player then tagged[target.player] = true end
-	if inflictor.player then tagged[inflictor.player] = true end
+	if inflictor and inflictor.player then tagged[inflictor.player] = true end
 end, MT_PLAYER)
 
 local function height(thing, tmthing)
