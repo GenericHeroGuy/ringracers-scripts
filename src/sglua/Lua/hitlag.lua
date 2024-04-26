@@ -57,11 +57,22 @@ end
 addHook("MobjCollide", droptarget, MT_DROPTARGET)
 addHook("MobjMoveCollide", droptarget, MT_DROPTARGET)
 
+local function setlag(p, mult)
+	p.mo.hitlag = FixedMul($, mult.value)
+
+	-- handle delayed ring burst. doesn't run if there's zero hitlag
+	if p.mo.hitlag == 0 and p.ringburst > 0 then
+		P_PlayerRingBurst(p, p.ringburst)
+		P_PlayRinglossSound(p.mo, nil)
+		p.ringburst = 0
+	end
+end
+
 addHook("PostThinkFrame", function(p)
 	for p in players.iterate do
 		-- damage hook or items or whatever
 		if tagged[p] then
-			p.mo.hitlag = FixedMul($, cv_hitlag.value)
+			setlag(p, cv_hitlag)
 			tagged[p] = false
 		end
 
@@ -70,19 +81,19 @@ addHook("PostThinkFrame", function(p)
 			tricking[p] = true
 		end
 		if tricking[p] and p.trickpanel ~= TRICKSTATE_READY then
-			p.mo.hitlag = FixedMul($, cv_tricklag.value)
+			setlag(p, cv_tricklag)
 			tricking[p] = false
 		end
 
 		-- hyudoro
 		-- BUG: game writes 14*TICRATE (or 490) to an SINT8, which overflows to -22
 		if p.stealingtimer == -22 then
-			p.mo.hitlag = FixedMul($, cv_hyudorolag.value)
+			setlag(p, cv_hyudorolag)
 		end
 
 		-- tripwire
 		if p.tripwirestate ~= TRIPSTATE_NONE then
-			p.mo.hitlag = FixedMul($, cv_triplag.value)
+			setlag(p, cv_triplag)
 		end
 	end
 end)
