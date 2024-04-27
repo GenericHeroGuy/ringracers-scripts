@@ -68,7 +68,13 @@ local function setlag(p, mult)
 	end
 end
 
-addHook("PostThinkFrame", function(p)
+addHook("PreThinkFrame", function()
+	for p in players.iterate do
+		tricking[p] = p.trickpanel == TRICKSTATE_READY
+	end
+end)
+
+addHook("PostThinkFrame", function()
 	for p in players.iterate do
 		-- damage hook or items or whatever
 		if tagged[p] then
@@ -77,12 +83,8 @@ addHook("PostThinkFrame", function(p)
 		end
 
 		-- tricks
-		if not tricking[p] and p.trickpanel == TRICKSTATE_READY then
-			tricking[p] = true
-		end
 		if tricking[p] and p.trickpanel ~= TRICKSTATE_READY then
 			setlag(p, cv_tricklag)
-			tricking[p] = false
 		end
 
 		-- hyudoro
