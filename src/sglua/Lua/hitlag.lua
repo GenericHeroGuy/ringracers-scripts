@@ -32,11 +32,41 @@ local cv_triplag = CV_RegisterVar({
 
 local TRICKSTATE_READY = 1
 local TRIPSTATE_NONE = 0
+local MFE_PAUSED = 1<<15
 
 local tagged = {}
 local tricking = {}
 
-addHook("MobjDamage", function(target, inflictor, source)
+local iskartitem = { MT_POGOSPRING = true, MT_EGGMANITEM = true, MT_EGGMANITEM_SHIELD = true, MT_BANANA = true, MT_BANANA_SHIELD = true, MT_ORBINAUT = true, MT_ORBINAUT_SHIELD = true, MT_JAWZ = true, MT_JAWZ_SHIELD = true, MT_SSMINE = true, MT_SSMINE_SHIELD = true, MT_LANDMINE = true, MT_DROPTARGET = true, MT_DROPTARGET_SHIELD = true, MT_BALLHOG = true, MT_SPB = true, MT_BUBBLESHIELDTRAP = true, MT_GARDENTOP = true, MT_HYUDORO = true, MT_SINK = true, MT_GACHABOM = true }
+
+local function P_FlashingException(player, inflictor)
+	return not (not inflictor or inflictor.type == MT_SSMINE or inflictor.type == MT_SPB or (not iskartitem[inflictor.type] and inflictor.type ~= MT_PLAYER) or not P_PlayerInPain(player))
+end
+
+addHook("MobjDamage", function(target, inflictor, source, _, damagetype)
+	if not (gametyperules & GTR_BUMPERS) and damagetype & DMG_STEAL then return end
+
+	-- handle combos, they do not skip MobjDamage
+	local type = damagetype & DMG_TYPEMASK
+	local hardhit = type == DMG_EXPLODE or type == DMG_KARMA or type == DMG_TUMBLE
+	local allowcombo = (hardhit or type == DMG_STUMBLE or type == DMG_WHUMBLE) == ((damagetype & DMG_WOMBO) == 0)
+
+	if type == DMG_TUMBLE then
+		if target.player.tumblebounces == 1 and P_MobjFlip(target)*target.momz > 0 then
+			allowcombo = false
+		end
+	elseif type == DMG_STUMBLE or type == DMG_WHUMBLE then
+		if target.player.tumblebounces == 3-1 and P_MobjFlip(target)*target.momz > 0 then
+			if type == DMG_STUMBLE then return end
+			allowcombo = false
+		end
+	end
+
+	if not allowcombo and (target.eflags & MFE_PAUSED) then return end
+
+	if (target.hitlag == 0 or not allowcombo) and target.player.flashing > 0 and type ~= DMG_EXPLODE and type ~= DMG_STUMBLE and type ~= DMG_WHUMBLE and not P_FlashingException(target.player, inflictor) then return end
+	if target.flags2 & MF2_ALREADYHIT then return end
+
 	if target.player then tagged[target.player] = true end
 	if inflictor and inflictor.player then tagged[inflictor.player] = true end
 end, MT_PLAYER)
