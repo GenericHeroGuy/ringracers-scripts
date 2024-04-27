@@ -12,6 +12,14 @@ local cv_showitemtimers = CV_RegisterVar({
     description = "Show Item Timers.",
 })
 
+local cv_showstack = CV_RegisterVar({
+    name = "timers_showstack",
+    defaultvalue = "Yes",
+    possiblevalue = CV_YesNo,
+
+    description = "Show amount of stacked boosts."
+})
+
 local cv_sort = CV_RegisterVar({
     name = "timers_sort",
     defaultvalue = "Time",
@@ -189,12 +197,14 @@ hud.add(function(v, p, c)
         table.sort(timerTable, function(a, b) if(a.timer ~= nil and b.timer ~= nil) then return sort(a, b) end end)
 
         -- This one always should be at end
-        table.insert(timerTable, {
-            name = "stackedboost",
-            timer = p.numboosts,
-            patches = {"DRSP1", "DRSP2"},
-            anim_frames = 2,
-        })
+        if cv_showstack.value == 1 then
+            table.insert(timerTable, {
+                name = "stackedboost",
+                timer = p.numboosts,
+                patches = {"DRSP1", "DRSP2"},
+                anim_frames = 2,
+            })
+        end
 
         -- Ditto
         table.insert(timerTable, {
