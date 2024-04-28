@@ -196,7 +196,13 @@ hud.add(function(v, p, c)
                 timer = p.spindashboost,
                 patches = {"SPNDSH1", "SPNDSH2", "SPNDSH3", "SPNDSH4"},
                 anim_frames = 3,
-            }
+            },
+            {
+                name = "wavedash",
+                timer = p.wavedashboost,
+                patches = {"WAVDSH1", "WAVDSH2", "WAVDSH3"},
+                anim_frames = 1,
+            },
         }
         -- sort table
 
