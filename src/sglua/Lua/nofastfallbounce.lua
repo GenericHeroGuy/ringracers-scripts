@@ -9,16 +9,8 @@ local cv_noffbounce = CV_RegisterVar {
 addHook("PlayerThink", function(p)
     if cv_noffbounce.value == 0 then return end
 
-    if not p.mo then return end
-
-    p.fastfall = 0
-
-    local onground = P_IsObjectOnGround(p.mo)
-
-    if not onground and ((p.cmd.buttons & BT_BRAKE) or p.fftriggered) then
-        p.fastfall = p.mo.momz
-        p.fftriggered = true
-    elseif onground then
-        p.fftriggered = false
+    -- the actual bounce is delayed by a tic for some reason, so this works
+    if p.mo and p.mo.eflags & MFE_JUSTHITFLOOR then
+        p.fastfall = 0
     end
 end)
