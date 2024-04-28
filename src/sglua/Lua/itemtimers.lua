@@ -191,6 +191,12 @@ hud.add(function(v, p, c)
                 patches = {"K_ISRNG"},
                 anim_frames = 1,
             },
+            {
+                name = "spindash",
+                timer = p.spindashboost,
+                patches = {"SPNDSH1", "SPNDSH2", "SPNDSH3", "SPNDSH4"},
+                anim_frames = 3,
+            }
         }
         -- sort table
 
