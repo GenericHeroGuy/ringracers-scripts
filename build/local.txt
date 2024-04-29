@@ -1,0 +1,9 @@
+$basepath src/sglua/
+$output out/local.pk3
+
+# build script for addfilelocal use
+
+Lua/itemtimers.lua
+Lua/driftgauge.lua
+Graphics/Timer/**
+Graphics/DriftGauge/**
