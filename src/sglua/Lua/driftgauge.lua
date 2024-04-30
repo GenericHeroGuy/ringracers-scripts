@@ -4,6 +4,9 @@
 -- G from future: it definitely is now!
 -- G from the distant future: it was always broken lmao
 
+-- oh wow, this looks way cooler now
+-- thanks spee! :3
+
 local fovvars
 local function R_FOV(num)
 	if not fovvars then
@@ -135,25 +138,12 @@ local function K_ObjectTracking(v, p, c, point, reverse)
 	return result
 end
 
-local driftcolors = {
-	-- TODO: pick better colors
-	-- top  --  bottom --
-	{  0,   4,   8,  12}, -- no drift
-	{ 72,  74,  76,  78}, -- yellow
-	{ 50,  52,  54,  56}, -- orange
-	{146, 148, 150, 152}, -- blue
-}
-
 local driftskins = {
-	SKINCOLOR_NONE,
-	SKINCOLOR_YELLOW,
-	SKINCOLOR_ORANGE,
+	[0] = SKINCOLOR_BLACK,
+	SKINCOLOR_SILVER,
+	SKINCOLOR_BANANA,
+	SKINCOLOR_CREAMSICLE,
 	SKINCOLOR_BLUE,
-}
-
-local driftrainbow = {
-	-- TODO: new palette
-	0, 31, 47, 63, 79, 95, 111, 119, 127, 143, 159, 175, 183, 191, 199, 207, 223, 247
 }
 
 local cv_driftgauge = CV_RegisterVar({
@@ -216,7 +206,23 @@ local function getBackgroundColormap(v, p)
     return v.getColormap(TC_RAINBOW, cv_colorizedhudcolor and cv_colorizedhudcolor.value or p.skincolor)
 end
 
+local function stringdraw(v, x, y, str, flags, colormap)
+	for i = 1, #str do
+		local char = str:sub(i, i)
+		local patch = v.cachePatch(string.format("OPPRF%03d", char:byte()))
+		v.drawScaled(x, y, FRACUNIT, patch, flags, colormap)
+		x = x + 6*FRACUNIT
+	end
+end
+
 local cv_kartdriftgauge = nil -- Check for hardcode driftgauge
+local afterval = {}
+local aftertime = {}
+local V_100TRANS = V_50TRANS*2
+local lineofs = { 0, 0, 2, 2, 0, 0 }
+local colors = { 100, 100, 97, 97, 100, 100 }
+local BAR_WIDTH = 46
+local clipcounts = { 0, 1, 2, 7 }
 hud.add(function(v, p, c)
     if cv_kartdriftgauge == nil then
         cv_kartdriftgauge = CV_FindVar("kartdriftgauge") or false
@@ -224,49 +230,81 @@ hud.add(function(v, p, c)
 
     if cv_kartdriftgauge and cv_kartdriftgauge.value then return end
 
-	if not (p.mo and c.chase and p.drift and cv_driftgauge.value and p.playerstate == PST_LIVE) then return end
-
-	local driftval = K_GetKartDriftSparkValue(p)
-	local driftcharge = min(driftval*4, p.driftcharge)
+	if not (p.mo and c.chase and cv_driftgauge.value and p.playerstate == PST_LIVE) then return end
 
 	local result = K_ObjectTracking(v, p, c, { x = p.mo.x, y = p.mo.y, z = p.mo.z + FixedMul(cv_driftgaugeofs.value, cv_driftgaugeofs.value > 0 and p.mo.scale or mapobjectscale) }, false)
 	local basex, basey = result.x, result.y
-	local dup = 1--v.dupx()
 
-	local drifttrans
-
+	local drifttrans = 0
 	if string.find(VERSIONSTRING:lower(), "saturn") and cv_driftgaugetrans.value then -- only use this in saturn since other clients dont support translucent drawfill or stuff will look off!
 		drifttrans = v.localTransFlag()
-	else
-		drifttrans = 0
 	end
 
-	v.drawScaled(basex, basey, FRACUNIT, getBackgroundPatch(v), drifttrans, getBackgroundColormap(v, p))
+	-- afterimage
+	if aftertime[p] then
+		if aftertime[p] <= leveltime then aftertime[p] = 0; return end
+		local trans = V_100TRANS - (V_10TRANS * (aftertime[p] - leveltime))
+		stringdraw(v, basex + 4*FRACUNIT, basey + 6*FRACUNIT, afterval[p], trans, v.getColormap(TC_RAINBOW, SKINCOLOR_SUPERSILVER1))
+		return
+	elseif not p.drift then
+		return
+	end
 
-	local barx = (basex>>FRACBITS) - dup*23
-	local bary = (basey>>FRACBITS) - dup*2
-	local BAR_WIDTH = 47--*dup
+	local driftval = K_GetKartDriftSparkValue(p)
+	local driftcharge = min(driftval*4, p.driftcharge)
+	local rainbow = driftcharge >= driftval*4
+
+	-- the little MT_DRIFTCLIPs
+	local clip = v.getSpritePatch(SPR_DBCL, rainbow and K or C)
+	local clipcount = clipcounts[driftcharge/driftval] or 0
+	for i = 0, clipcount-1 do
+		v.drawScaled(basex + FRACUNIT - i*FRACUNIT*3, sin(leveltime*ANG20*clipcount + i*ANGLE_22h)*2 + basey + 9*FRACUNIT, FRACUNIT/3, clip, drifttrans)
+	end
+
+	-- the base graphic
+	v.drawScaled(basex, basey, FRACUNIT, getBackgroundPatch(v), drifttrans, getBackgroundColormap(v, p))
+	if rainbow then
+		-- HOT HOT HOT HOT HOOOOOOOT AAAAIIIIIIIIEEEEEEEEEEEEEEEEE
+		local trans = abs(sin(leveltime*ANGLE_22h)/(4*FRACUNIT/10))
+		v.drawScaled(basex, basey, FRACUNIT, getBackgroundPatch(v), V_90TRANS - V_10TRANS*trans, v.getColormap(TC_BLINK, SKINCOLOR_RED))
+	end
+
+	local barx = basex - 22*FRACUNIT
+	local bary = basey + FRACUNIT*2
 
 	local width = ((driftcharge % driftval) * BAR_WIDTH) / driftval
 	local level = (driftcharge / driftval) + 1
+	local patch = "~%03d"
 
-	-- TODO: some function to translate fractional coords to V_NOSCALESTART for drawfill
-	local cmap
-	if driftcharge >= driftval*4 then -- rainbow sparks
-		cmap = v.getColormap(TC_RAINBOW, 1 + leveltime % (MAXSKINCOLORS-1))
-		for i = 1, 4 do
-			v.drawFill(barx, bary+dup*i, BAR_WIDTH, dup, (driftrainbow[(leveltime % #driftrainbow) + 1] + i*2) | drifttrans)
-		end
-	else -- none/yellow/orange/blue
-		cmap = v.getColormap(TC_RAINBOW, driftskins[level])
-		for i = 1, 4 do
-			if driftcharge >= driftval then
-				v.drawFill(barx, bary+dup*i, BAR_WIDTH, dup, driftcolors[level-1][i] | drifttrans)
-			end
-			v.drawFill(barx, bary+dup*i, width, dup, driftcolors[level][i] | drifttrans)
+	local cmap = v.getColormap(TC_RAINBOW, driftskins[level])
+	local cmap2 = v.getColormap(TC_RAINBOW, driftskins[level-1])
+	if rainbow then
+		cmap = v.getColormap(TC_RAINBOW, 1 + (leveltime % FIRSTSUPERCOLOR - 1))
+		cmap2 = cmap
+	end
+	for i = 0, #lineofs - 1 do
+		local ofs = lineofs[i+1]*FRACUNIT/2
+		local x = barx + ofs
+		local y = bary+i*FRACUNIT/2
+		local w = (max(0, min(width*FRACUNIT - ofs, BAR_WIDTH*FRACUNIT - ofs*2))) / 64
+		local h = FRACUNIT/128
+		-- back
+		v.drawStretched(x, y, (BAR_WIDTH*FRACUNIT - ofs*2)/64, h, v.cachePatch(patch:format(colors[i+1] + (level == 1 and 8 or 0))), drifttrans, cmap2)
+		-- front
+		if not rainbow then
+			v.drawStretched(x, y, w, h, v.cachePatch(patch:format(colors[i+1])), drifttrans, cmap)
 		end
 	end
 
 	-- right, also draw a cool number
-	v.drawPingNum(basex + (dup*32), basey, driftcharge*100 / driftval, drifttrans, cmap)
+	local charge = string.format("%03d", driftcharge*100 / driftval)
+	stringdraw(v, basex + 4*FRACUNIT, basey + 6*FRACUNIT, charge, drifttrans, cmap)
+
+	-- and trigger the afterimage
+	if p.pflags & PF_DRIFTEND then
+		afterval[p] = charge
+		aftertime[p] = leveltime + 10
+	else
+		aftertime[p] = 0
+	end
 end)
