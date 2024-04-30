@@ -15,7 +15,7 @@ local cv_itembox_fuse = CV_RegisterVar({
 })
 
 local S_RINGBOX1 = S_RINGBOX1
-local S_RINGBOX12 = S_RINGBOX1
+local S_RINGBOX12 = S_RINGBOX12
 
 -- No ringboxes
 addHook("MobjThinker", function(mo)
