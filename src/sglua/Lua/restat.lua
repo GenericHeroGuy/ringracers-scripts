@@ -180,13 +180,24 @@ addHook("ThinkFrame", function()
 	end
 end)
 
+local function stringdraw(v, x, y, str, flags, colormap)
+	for i = 1, #str do
+		local char = str:sub(i, i)
+		local patch = v.cachePatch(string.format("OPPRF%03d", char:byte()))
+		v.drawScaled(x, y, FRACUNIT, patch, flags, colormap)
+		x = x + 6*FRACUNIT
+	end
+end
+
 --Hud
 hud.add(function(v, p)
 	local flags = V_SNAPTOLEFT | V_SNAPTOBOTTOM | V_SLIDEIN
 
-	v.draw(20, 189, v.cachePatch("GFXHUS"), flags)
-	v.draw(40, 189, v.cachePatch("GFXHUW"), flags)
+	v.draw(17, 189, v.cachePatch("GFXHUS"), flags)
+	v.draw(37, 189, v.cachePatch("GFXHUW"), flags)
 
-	v.drawString(31, 191, "\x87"..p.kartspeed, flags)
-	v.drawString(51, 191, "\x84"..p.kartweight, flags)
+	local smap = v.getColormap(TC_RAINBOW, SKINCOLOR_ORANGE)
+	local wmap = v.getColormap(TC_RAINBOW, SKINCOLOR_BLUE)
+	stringdraw(v, 28*FRACUNIT, 191*FRACUNIT, tostring(p.kartspeed), flags, smap)
+	stringdraw(v, 48*FRACUNIT, 191*FRACUNIT, tostring(p.kartweight), flags, wmap)
 end)
