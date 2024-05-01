@@ -1,6 +1,6 @@
 local disable_ringsting = CV_RegisterVar({
 	name = "disable_ringsting",
-	defaultvalue = "Off",
+	defaultvalue = "On",
 	flags = CV_NETVAR,
 	possiblevalue = CV_OnOff,
 	description = "Disables the Ring Sting mechanic if on."
@@ -8,7 +8,7 @@ local disable_ringsting = CV_RegisterVar({
 
 local disable_ringdebt = CV_RegisterVar({
 	name = "disable_ringdebt",
-	defaultvalue = "Off",
+	defaultvalue = "On",
 	flags = CV_NETVAR,
 	possiblevalue = CV_OnOff,
 	description = "Disables Ring debt if on."
@@ -16,7 +16,7 @@ local disable_ringdebt = CV_RegisterVar({
 
 local disable_spindash_overcharge = CV_RegisterVar({
 	name = "disable_spindash_overcharge",
-	defaultvalue = "Off",
+	defaultvalue = "On",
 	flags = CV_NETVAR,
 	possiblevalue = CV_OnOff,
 	description = "Disables Spindash overcharge if on."

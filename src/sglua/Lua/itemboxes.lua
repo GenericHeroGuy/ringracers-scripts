@@ -1,6 +1,6 @@
 local cv_disable_ringboxes = CV_RegisterVar({
 	name = "disable_ringboxes",
-	defaultvalue = "On",
+	defaultvalue = "Off",
 	flags = CV_NETVAR,
 	possiblevalue = CV_OnOff,
 	description = "Disables ringboxes",
