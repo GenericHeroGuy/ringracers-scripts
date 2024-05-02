@@ -43,11 +43,18 @@ local function K_GetSpindashChargeTime(player)
 	return ((player.kartspeed + 8) * TICRATE) / 6
 end
 
+local INSTAWHIP_RINGDRAINEVERY = TICRATE/2
+local INSTAWHIP_CHARGETIME = 3*TICRATE/4
+
 -- normal playr thinker hererer
 local function unfuckhitlag(player)
 	-- put the no ring debt here
 	if disable_ringdebt.value then
 		player.rings = max($, 0)
+		-- silence instawhip ring drain
+		if player.rings <= 0 and player.instawhipcharge > INSTAWHIP_CHARGETIME and leveltime % INSTAWHIP_RINGDRAINEVERY == 0 then
+			S_StopSoundByID(player.mo, sfx_antiri)
+		end
 	end
 	
 	-- spindash overcharge
