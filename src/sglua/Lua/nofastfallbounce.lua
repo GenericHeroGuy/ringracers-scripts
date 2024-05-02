@@ -6,7 +6,7 @@ local cv_noffbounce = CV_RegisterVar {
     description = "Removes bounce from fast fall",
 }
 
-local CONFIG_FILENAME = "fastfallbounce.cfg"
+local CONFIG_FILENAME = "client/fastfallbounce.cfg"
 
 local function updateConfig(p)
     local file, err = io.openlocal(CONFIG_FILENAME, "w")
