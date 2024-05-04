@@ -14,12 +14,10 @@ addHook("PlayerThink", function(player)
     end
 
     if respawn then
-        if player.flashing_store then
-            player.flashing = player.flashing_store
-        else
-            player.flashing_store = player.flashing
-        end
-    else
+        player.flashing_store = max($ or K_GetKartFlashing(player), player.flashing)
+        player.flashing = player.flashing_store
+    elseif player.flashing_store then
+        player.flashing = player.flashing_store
         player.flashing_store = nil
     end
 end)
