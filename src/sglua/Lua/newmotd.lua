@@ -1,3 +1,4 @@
+-- Created by Indev for Sunflower's Garden
 local newmotd = CV_RegisterVar({
     name = "newmotd",
     defaultvalue = '',

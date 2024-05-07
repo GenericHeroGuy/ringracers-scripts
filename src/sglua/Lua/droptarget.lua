@@ -1,3 +1,4 @@
+-- Created by Indev for Sunflower's Garden
 -- Tweaks for droptarget item
 
 local cv_maxhp = CV_RegisterVar {

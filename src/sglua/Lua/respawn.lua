@@ -1,3 +1,5 @@
+-- Created by Indev for Sunflower's Garden
+-- Fixes a bug where drop dashing doesn't work sometimes
 local cv_respawnspin = CV_RegisterVar({
     name = "respawnspin",
     defaultvalue = "Off",

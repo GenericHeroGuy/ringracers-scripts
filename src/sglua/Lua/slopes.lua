@@ -1,3 +1,4 @@
+-- Created by Indev for Sunflower's Garden
 local cv_slopehelp = CV_RegisterVar({
     name = "slopehelp",
     defaultvalue = "On",

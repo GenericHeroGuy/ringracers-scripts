@@ -1,4 +1,5 @@
 -- Intermission tips ported from SG Hostmod
+-- Created by Indev for Sunflower's Garden
 
 local inttips_hide = CV_RegisterVar({
 	name = "inttips_hide",

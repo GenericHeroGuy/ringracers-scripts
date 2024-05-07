@@ -1,3 +1,4 @@
+-- Created by Indev for Sunflower's Garden
 local cv_shrinktime = CV_RegisterVar({
     name = "shrinktime",
     defaultvalue = "10",
