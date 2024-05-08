@@ -9,26 +9,25 @@ local cv_enabled = CV_RegisterVar({
 })
 
 local hitlist = {}
-local timetolive = TICRATE*3
+local timetolive = TICRATE*4
 local check = {}
 
 local function AddHit(hit)
 	if not cv_enabled.value then return end
 
-	if hit.icon == nil then
-		print(string.format("No icon? inflictor %s source %s", hit.inflictor and hit.inflictor.valid and mobjinfo[hit.inflictor.type].string or "?", hit.source and hit.source.valid and hit.source.name or "?"))
-	end
-
 	for _, hit2 in ipairs(hitlist) do
-		if hit.source == hit2.source and hit.damagetype == hit2.damagetype then
+		if hit.source == hit2.source then
 			-- check for combos
-			if hit2.targets[hit.target] then
+			-- "WHY ARE YOU USING THE ICON!?"
+			-- i mean, it effectively doubles as a "hit type"
+			-- ...you ARE giving unique icons to everything, right? :)
+			if hit2.targets[hit.target] and hit.icon == hit2.icon then
 				hit2.targets[hit.target] = $ + 1
 				hit2.timestamp = leveltime
 				hit2.timetodie = leveltime + timetolive
 				return
 			-- check for multihits
-			elseif hit.inflictor == hit2.inflictor then
+			elseif hit.inflictor == hit2.inflictor and not hit2.targets[hit.target] then
 				hit2.targets[hit.target] = 1
 				hit2.timestamp = leveltime
 				hit2.timetodie = leveltime + timetolive
@@ -195,38 +194,10 @@ addHook("MapChange", function()
 	hitlist = {}
 end)
 
-local iconheight = 8
 local HEIGHT = 9
-local padding = 3
-local iconoffset = FRACUNIT/2
-local font = "thin"
-local vflags = V_SNAPTOTOP|V_SNAPTOLEFT
-
--- TODO: rip this shit out and use GetOffsets
-local function HitWidth(v, hit, vflags, font)
-	local w = 0
-
-	if hit.source and not hit.targets[hit.source] then
-		w = $ + v.stringWidth(hit.source.name, vflags, font)
-	end
-	w = $ + (hit.leftpad or 1)
-
-	if hit.icon then
-		local icon = v.cachePatch(hit.icon)
-		local scale = FixedDiv(iconheight, max(iconheight, icon.height))
-		w = $ + (hit.iconpadleft or 1)
-		w = $ + (icon.width*scale)>>FRACBITS + (hit.iconpadright or 1)
-	end
-	w = $ + (hit.rightpad or 1)
-
-	local add = 0
-	for target, combo in pairs(hit.targets) do
-		add = max($, v.stringWidth(target.name, vflags, font) + (combo > 1 and v.stringWidth(string.format("x%d", combo), vflags, font) + 1 or 0))
-	end
-	w = $ + add
-
-	return w
-end
+local ICONHEIGHT = 8
+local ICONOFFSET = FRACUNIT/2
+local V_100TRANS = V_50TRANS*2
 
 local function GetOffsets(v, hit, vflags, font)
 	local w = 0
@@ -241,16 +212,16 @@ local function GetOffsets(v, hit, vflags, font)
 	ofs.icon = w
 	if hit.icon then
 		local icon = v.cachePatch(hit.icon)
-		local scale = FixedDiv(iconheight, max(iconheight, icon.height))
-		w = $ + (hit.iconpadleft or 1)
-		w = $ + (icon.width*scale)>>FRACBITS + (hit.iconpadright or 1)
+		local scale = FixedDiv(ICONHEIGHT, max(ICONHEIGHT, icon.height))
+		ofs.icon = w
+		w = $ + (icon.width*scale)>>FRACBITS
 	end
 	w = $ + (hit.rightpad or 1)
 
 	ofs.right = w
 	local add = 0
 	for target, combo in pairs(hit.targets) do
-		add = max($, v.stringWidth(target.name, vflags, font) + (combo > 1 and v.stringWidth(string.format("x%d", combo), vflags, font) + 1 or 0))
+		add = max($, v.stringWidth(target.name, vflags, font) + (combo > 1 and v.stringWidth("x"..combo, vflags, font) + 1 or 0))
 	end
 	w = $ + add
 
@@ -266,60 +237,83 @@ hud.add(function(v, p)
 		end
 	end
 
-	local hy = 0
-	local tallest = HEIGHT*5
+	local font = "thin"
+	local hy = 4
+	local tallest = 64
+
 	for i, hit in ipairs(hitlist) do
 		local hx = 56
-		local basehx = hx
+		local vflags = V_SNAPTOTOP|V_SNAPTOLEFT|(V_10TRANS*max(0, leveltime - hit.timetodie + 10))
 
-		hy = $ + HEIGHT + padding
 		local multiheight = -HEIGHT
 		for _ in pairs(hit.targets) do multiheight = $ + HEIGHT end
 
-		local width = HitWidth(v, hit, vflags, font)
-		local bg = v.cachePatch(hit.source == p and "~100" or "~104")
+		local offsets = GetOffsets(v, hit, vflags, font)
 		local cmap = v.getColormap(TC_DEFAULT, hit.source == p and SKINCOLOR_WHITE or SKINCOLOR_BLACK)
-		v.drawStretched((hx-1)*FRACUNIT, (hy-1)*FRACUNIT, FixedDiv(width+2, bg.width), FixedDiv(HEIGHT+multiheight+2, bg.height), bg, vflags, cmap)
+		local bg = v.cachePatch(hit.source == p and "HLLBG" or "HLDBG")
+		local corner = v.cachePatch(hit.source == p and "HLLCORNER" or "HLDCORNER")
+		local top = v.cachePatch(hit.source == p and "HLLTOP" or "HLDTOP")
+		local side = v.cachePatch(hit.source == p and "HLLSIDE" or "HLDSIDE")
 
+		-- background/corner/side widths/heights
+		local bw = FixedDiv(offsets.edge, bg.width)
+		local bh = FixedDiv(HEIGHT + multiheight, bg.height)
+		local cw = offsets.edge + corner.width
+		local ch = HEIGHT + multiheight
+		local sw = FixedDiv(offsets.edge, top.width)
+		local sh = FixedDiv(HEIGHT + multiheight, side.height)
+
+		hy = $ + 1 + max(corner.height, top.height)*2
+
+		-- background
+		v.drawStretched(hx*FRACUNIT, hy*FRACUNIT, bw, bh, bg, vflags, cmap)
+
+		-- top, bottom, left, right
+		v.drawStretched(hx*FRACUNIT, (hy - top.height)*FRACUNIT, sw, FRACUNIT, top, vflags, cmap)
+		v.drawStretched(hx*FRACUNIT, hy*FRACUNIT + sh*side.height, sw, FRACUNIT, top, vflags | V_VFLIP, cmap)
+		v.drawStretched((hx - side.width)*FRACUNIT, hy*FRACUNIT, FRACUNIT, sh, side, vflags, cmap)
+		v.drawStretched((hx + side.width)*FRACUNIT + sw*top.width, hy*FRACUNIT, FRACUNIT, sh, side, vflags | V_FLIP, cmap)
+
+		-- top left, top right, bottom left, bottom right
+		v.draw(hx - corner.width, hy - corner.height, corner, vflags, cmap)
+		v.draw(hx + cw, hy - corner.height, corner, vflags | V_FLIP, cmap)
+		v.draw(hx - corner.width, hy + ch, corner, vflags, cmap)
+		v.draw(hx + cw, hy + ch, corner, vflags | V_FLIP | V_VFLIP, cmap)
+
+		-- source
 		if hit.source and not hit.targets[hit.source] then
-			v.drawString(hx, hy + multiheight/2, hit.source.name, vflags, font)
-			hx = $ + v.stringWidth(hit.source.name, vflags, font)
+			local color = skincolors[hit.source.skincolor].chatcolor
+			v.drawString(hx + offsets.left, hy + multiheight/2, hit.source.name, vflags | color, font)
 		end
-		hx = $ + (hit.leftpad or 1)
 
+		-- icon
 		if hit.icon then
 			local icon = v.cachePatch(hit.icon)
-			local scale = FixedDiv(iconheight, max(iconheight, icon.height))
+			local scale = FixedDiv(ICONHEIGHT, max(ICONHEIGHT, icon.height))
 			local cmap = v.getColormap(TC_DEFAULT, hit.source == p and SKINCOLOR_BLACK or SKINCOLOR_WHITE)
-			hx = $ + (hit.iconpadleft or 1)
-			v.drawScaled(hx*FRACUNIT, (hy+multiheight/2)*FRACUNIT + iconoffset, scale, icon, vflags, cmap)
-			hx = $ + (icon.width*scale)>>FRACBITS + (hit.iconpadright or 1)
+			v.drawScaled((hx + offsets.icon)*FRACUNIT, (hy+multiheight/2)*FRACUNIT + ICONOFFSET, scale, icon, vflags, cmap)
 		end
-		hx = $ + (hit.rightpad or 1)
 
-		local add = 0
+		-- target(s)
 		local i = 0
 		for target, combo in pairs(hit.targets) do
-			local new = 0
-			v.drawString(hx, hy+i*HEIGHT, target.name, vflags, font)
-			new = v.stringWidth(target.name, vflags, font)
+			local color = skincolors[target.skincolor].chatcolor
+			v.drawString(hx + offsets.right, hy+i*HEIGHT, target.name, vflags | color, font)
 			if combo > 1 then
+				local nameofs = v.stringWidth(target.name, vflags, font) + 1
 				local color = (leveltime - hit.timestamp < TICRATE/3) and leveltime & 1 and V_ORANGEMAP or V_YELLOWMAP
-				v.drawString(hx+new+1, hy+i*HEIGHT, string.format("x%d", combo), vflags | color, font)
-				new = $ + v.stringWidth(string.format("x%d", combo), vflags | color, font)
+				v.drawString(hx + offsets.right + nameofs, hy+i*HEIGHT, "x"..combo, vflags | color, font)
 			end
-			add = max($, new)
 			i = $ + 1
 		end
-		hx = $ + add
 
 		-- extra drawing function
 		local ofs = GetOffsets(v, hit, vflags, font)
 		if hit.extrafunc then
-			hit.extrafunc(v, hit, ofs, basehx, hy, vflags)
+			hit.extrafunc(v, hit, ofs, hx, hy, vflags)
 		end
 
-		hy = $ + multiheight
+		hy = $ + HEIGHT + multiheight
 		if hy >= tallest then return end
 	end
 end)
