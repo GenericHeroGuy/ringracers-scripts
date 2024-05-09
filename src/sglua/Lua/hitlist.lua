@@ -28,10 +28,13 @@ local function AddHit(hit)
 				return
 			-- check for multihits
 			elseif hit.inflictor == hit2.inflictor and not hit2.targets[hit.target] then
-				hit2.targets[hit.target] = 1
-				hit2.timestamp = leveltime
-				hit2.timetodie = leveltime + timetolive
-				return
+				-- deaths must occur on the same tic to count
+				if not (hit.death and hit2.timestamp ~= leveltime) then
+					hit2.targets[hit.target] = 1
+					hit2.timestamp = leveltime
+					hit2.timetodie = leveltime + timetolive
+					return
+				end
 			end
 		end
 	end
@@ -109,6 +112,25 @@ addHook("MobjDamage", function(target, inflictor, source, damage, damagetype)
 	table.insert(check, hit)
 end, MT_PLAYER)
 
+-- sinks and death
+addHook("MobjDeath", function(target, inflictor, source, damagetype)
+	local icon = "HL_DEATH"
+
+	if inflictor then
+		if inflictor.type == MT_SINK then
+			icon = "HL_KITCHENSINK"
+		end
+	end
+
+	AddHit({
+		death = true,
+		target = target.player,
+		inflictor = inflictor,
+		source = source and source.player,
+		icon = icon,
+	})
+end, MT_PLAYER)
+
 -- hyudoro
 addHook("TouchSpecial", function(special, toucher)
 	if special.extravalue1 ~= 0 then return end -- HYU_PATROL
@@ -127,7 +149,7 @@ addHook("TouchSpecial", function(special, toucher)
 	AddHit({
 		target = toucher.player,
 		inflictor = special,
-		source = master.player,
+		source = master and master.player,
 		icon = "HL_HYUDORO",
 		rightpad = 7,
 
@@ -157,7 +179,7 @@ local function droptarget(thing, tmthing)
 		AddHit({
 			target = tmthing.player,
 			inflictor = thing,
-			source = thing.target.player,
+			source = thing.target and thing.target.player,
 			icon = "HL_DROPTARGET",
 		})
 	end
@@ -243,17 +265,21 @@ hud.add(function(v, p)
 
 	for i, hit in ipairs(hitlist) do
 		local hx = 56
-		local vflags = V_SNAPTOTOP|V_SNAPTOLEFT|(V_10TRANS*max(0, leveltime - hit.timetodie + 10))
+		-- TODO: V_SPLITSCREEN is broken (r_splitscreen never gets updated in HUD hooks)
+		local vflags = V_SNAPTOTOP|V_SNAPTOLEFT|V_SPLITSCREEN|(V_10TRANS*max(0, leveltime - hit.timetodie + 10))
 
 		local multiheight = -HEIGHT
 		for _ in pairs(hit.targets) do multiheight = $ + HEIGHT end
 
+		local light = hit.source == p or hit.targets[p]
+		if splitscreen and not light then continue end
+
 		local offsets = GetOffsets(v, hit, vflags, font)
-		local cmap = v.getColormap(TC_DEFAULT, hit.source == p and SKINCOLOR_WHITE or SKINCOLOR_BLACK)
-		local bg = v.cachePatch(hit.source == p and "HLLBG" or "HLDBG")
-		local corner = v.cachePatch(hit.source == p and "HLLCORNER" or "HLDCORNER")
-		local top = v.cachePatch(hit.source == p and "HLLTOP" or "HLDTOP")
-		local side = v.cachePatch(hit.source == p and "HLLSIDE" or "HLDSIDE")
+		local cmap = v.getColormap(TC_DEFAULT, light and SKINCOLOR_WHITE or SKINCOLOR_BLACK)
+		local bg = v.cachePatch(light and "HLLBG" or "HLDBG")
+		local corner = v.cachePatch(light and "HLLCORNER" or "HLDCORNER")
+		local top = v.cachePatch(light and "HLLTOP" or "HLDTOP")
+		local side = v.cachePatch(light and "HLLSIDE" or "HLDSIDE")
 
 		-- background/corner/side widths/heights
 		local bw = FixedDiv(offsets.edge, bg.width)
@@ -290,7 +316,7 @@ hud.add(function(v, p)
 		if hit.icon then
 			local icon = v.cachePatch(hit.icon)
 			local scale = FixedDiv(ICONHEIGHT, max(ICONHEIGHT, icon.height))
-			local cmap = v.getColormap(TC_DEFAULT, hit.source == p and SKINCOLOR_BLACK or SKINCOLOR_WHITE)
+			local cmap = v.getColormap(TC_DEFAULT, light and SKINCOLOR_BLACK or SKINCOLOR_WHITE)
 			v.drawScaled((hx + offsets.icon)*FRACUNIT, (hy+multiheight/2)*FRACUNIT + ICONOFFSET, scale, icon, vflags, cmap)
 		end
 
