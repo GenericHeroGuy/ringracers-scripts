@@ -31,6 +31,7 @@ local function AddHit(hit)
 				-- deaths must occur on the same tic to count
 				if not (hit.death and hit2.timestamp ~= leveltime) then
 					hit2.targets[hit.target] = 1
+					table.insert(hit2.targetorder, hit.target)
 					hit2.timestamp = leveltime
 					hit2.timetodie = leveltime + timetolive
 					return
@@ -41,6 +42,7 @@ local function AddHit(hit)
 
 	-- no combo
 	hit.targets = { [hit.target] = 1 }
+	hit.targetorder = { [0] = hit.target }
 	hit.timestamp = leveltime
 	hit.timetodie = leveltime + timetolive
 	table.insert(hitlist, hit)
@@ -321,8 +323,10 @@ hud.add(function(v, p)
 		end
 
 		-- target(s)
-		local i = 0
-		for target, combo in pairs(hit.targets) do
+		-- for target, combo in pairs(hit.targets) do
+		for i = 0, #hit.targetorder do
+			local target = hit.targetorder[i]
+			local combo = hit.targets[target]
 			local color = skincolors[target.skincolor].chatcolor
 			v.drawString(hx + offsets.right, hy+i*HEIGHT, target.name, vflags | color, font)
 			if combo > 1 then
@@ -330,7 +334,6 @@ hud.add(function(v, p)
 				local color = (leveltime - hit.timestamp < TICRATE/3) and leveltime & 1 and V_ORANGEMAP or V_YELLOWMAP
 				v.drawString(hx + offsets.right + nameofs, hy+i*HEIGHT, "x"..combo, vflags | color, font)
 			end
-			i = $ + 1
 		end
 
 		-- extra drawing function
