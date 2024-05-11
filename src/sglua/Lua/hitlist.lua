@@ -195,11 +195,14 @@ addHook("MobjMoveCollide", droptarget, MT_DROPTARGET)
 -- clear MF2_ALREADYHIT, which makes the hit fail to register
 -- the solution? forcibly insert an extra thinker between players which checks if the flag is set :))))))))))
 -- brought to you by a lack of PlayerSpin
-freeslot("MT_MOBJACTUALLYDAMAGED")
-mobjinfo[MT_MOBJACTUALLYDAMAGED] = { flags = MF_NOBLOCKMAP|MF_NOSECTOR, spawnstate = S_INVISIBLE }
+freeslot("S_ACTUALLYDAMAGED")
+
 addHook("PlayerSpawn", function(p)
 	if p.actuallydamaged and p.actuallydamaged.valid then P_RemoveMobj(p.actuallydamaged) end
-	p.actuallydamaged = P_SpawnMobj(p.mo.x, p.mo.y, p.mo.z, MT_MOBJACTUALLYDAMAGED)
+	local mo = P_SpawnMobj(p.mo.x, p.mo.y, p.mo.z, MT_THOK)
+	mo.flags = $ | MF_NOSECTOR
+	mo.state = S_ACTUALLYDAMAGED
+	p.actuallydamaged = mo
 end)
 
 local function CheckHits()
@@ -211,12 +214,16 @@ local function CheckHits()
 	end
 end
 
-addHook("MobjThinker", CheckHits, MT_MOBJACTUALLYDAMAGED)
-addHook("ThinkFrame", CheckHits) -- need this for player 0
+states[S_ACTUALLYDAMAGED] = {
+	tics = 1,
+	nextstate = S_ACTUALLYDAMAGED,
+	action = CheckHits
+}
 
-addHook("MapChange", function()
-	hitlist = {}
-end)
+-- need this for the last player
+addHook("ThinkFrame", CheckHits)
+
+addHook("MapChange", do hitlist = {} end)
 
 local HEIGHT = 9
 local ICONHEIGHT = 8
