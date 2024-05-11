@@ -229,6 +229,7 @@ local HEIGHT = 9
 local ICONHEIGHT = 8
 local ICONOFFSET = FRACUNIT/2
 local V_100TRANS = V_50TRANS*2
+local FONTHEIGHTS = { thin = 9, small = 4 }
 
 -- somebody disconnected? no problem, just replace them :^)
 local function CheckValid(hit)
@@ -247,33 +248,48 @@ local function CheckValid(hit)
 	end
 end
 
-local function GetOffsets(v, hit, vflags, font)
-	local w = 0
+local function GetFont(v, name, vflags)
+	local font = "thin"
+	local width = v.stringWidth(name, vflags, font)
+	if width >= 60 then -- too long
+		font = "small"
+		width = v.stringWidth(name, vflags, font)
+	end
+	return font, width
+end
+
+local function GetOffsets(v, hit, vflags)
+	local ox = 0
 	local ofs = {}
 
-	ofs.left = w
+	ofs.left = ox
 	if hit.source and not hit.targets[hit.source] then
-		w = $ + v.stringWidth(hit.source.name, vflags, font)
+		local font, width = GetFont(v, hit.source.name, vflags)
+		ofs.sourcefont = font
+		ox = $ + width
 	end
-	w = $ + (hit.leftpad or 1)
+	ox = $ + (hit.leftpad or 1)
 
-	ofs.icon = w
+	ofs.icon = ox
 	if hit.icon then
 		local icon = v.cachePatch(hit.icon)
 		local scale = FixedDiv(ICONHEIGHT, max(ICONHEIGHT, icon.height))
-		ofs.icon = w
-		w = $ + (icon.width*scale)>>FRACBITS
+		ofs.icon = ox
+		ox = $ + (icon.width*scale)>>FRACBITS
 	end
-	w = $ + (hit.rightpad or 1)
+	ox = $ + (hit.rightpad or 1)
 
-	ofs.right = w
+	ofs.right = ox
 	local add = 0
+	ofs.targetfont = {}
 	for target, combo in pairs(hit.targets) do
-		add = max($, v.stringWidth(target.name, vflags, font) + (combo > 1 and v.stringWidth("x"..combo, vflags, font) + 1 or 0))
+		local font, width = GetFont(v, target.name, vflags)
+		ofs.targetfont[target] = font
+		add = max($, width + (combo > 1 and v.stringWidth("x"..combo, vflags, "thin") + 1 or 0))
 	end
-	w = $ + add
+	ox = $ + add
 
-	ofs.edge = w
+	ofs.edge = ox
 	return ofs
 end
 
@@ -285,7 +301,6 @@ hud.add(function(v, p)
 		end
 	end
 
-	local font = "thin"
 	local hy = 4
 	local tallest = 64
 
@@ -302,7 +317,7 @@ hud.add(function(v, p)
 		local light = hit.source == p or hit.targets[p]
 		if splitscreen and not light then continue end
 
-		local offsets = GetOffsets(v, hit, vflags, font)
+		local offsets = GetOffsets(v, hit, vflags)
 		local cmap = v.getColormap(TC_DEFAULT, light and SKINCOLOR_WHITE or SKINCOLOR_BLACK)
 		local bg = v.cachePatch(light and "HLLBG" or "HLDBG")
 		local corner = v.cachePatch(light and "HLLCORNER" or "HLDCORNER")
@@ -325,8 +340,9 @@ hud.add(function(v, p)
 		-- top, bottom, left, right
 		v.drawStretched(hx*FRACUNIT, (hy - top.height)*FRACUNIT, sw, FRACUNIT, top, vflags, cmap)
 		v.drawStretched(hx*FRACUNIT, hy*FRACUNIT + sh*side.height, sw, FRACUNIT, top, vflags | V_VFLIP, cmap)
-		v.drawStretched((hx - side.width)*FRACUNIT, hy*FRACUNIT, FRACUNIT, sh, side, vflags, cmap)
-		v.drawStretched((hx + side.width)*FRACUNIT + sw*top.width, hy*FRACUNIT, FRACUNIT, sh, side, vflags | V_FLIP, cmap)
+		-- XXX: on OpenGL, if the hscale is exactly FRACUNIT, the vertical scale just doesn't work?????
+		v.drawStretched((hx - side.width)*FRACUNIT, hy*FRACUNIT, FRACUNIT+1, sh, side, vflags, cmap)
+		v.drawStretched((hx + side.width)*FRACUNIT + sw*top.width + 1, hy*FRACUNIT, FRACUNIT+1, sh, side, vflags | V_FLIP, cmap)
 
 		-- top left, top right, bottom left, bottom right
 		v.draw(hx - corner.width, hy - corner.height, corner, vflags, cmap)
@@ -337,7 +353,9 @@ hud.add(function(v, p)
 		-- source
 		if hit.source and not hit.targets[hit.source] then
 			local color = skincolors[hit.source.skincolor].chatcolor
-			v.drawString(hx + offsets.left, hy + multiheight/2, hit.source.name, vflags | color, font)
+			local font = offsets.sourcefont
+			local fofs = (HEIGHT - FONTHEIGHTS[font])/2
+			v.drawString(hx + offsets.left, hy + multiheight/2 + fofs, hit.source.name, vflags | color, font)
 		end
 
 		-- icon
@@ -354,18 +372,19 @@ hud.add(function(v, p)
 			local target = hit.targetorder[i]
 			local combo = hit.targets[target]
 			local color = skincolors[target.skincolor].chatcolor
-			v.drawString(hx + offsets.right, hy+i*HEIGHT, target.name, vflags | color, font)
+			local font = offsets.targetfont[target]
+			local fofs = (HEIGHT - FONTHEIGHTS[font])/2
+			v.drawString(hx + offsets.right, hy+i*HEIGHT + fofs, target.name, vflags | color, font)
 			if combo > 1 then
-				local nameofs = v.stringWidth(target.name, vflags, font) + 1
+				local nameofs = v.stringWidth(target.name, vflags, offsets.targetfont[target]) + 1
 				local color = (leveltime - hit.timestamp < TICRATE/3) and leveltime & 1 and V_ORANGEMAP or V_YELLOWMAP
-				v.drawString(hx + offsets.right + nameofs, hy+i*HEIGHT, "x"..combo, vflags | color, font)
+				v.drawString(hx + offsets.right + nameofs, hy+i*HEIGHT, "x"..combo, vflags | color, "thin")
 			end
 		end
 
 		-- extra drawing function
-		local ofs = GetOffsets(v, hit, vflags, font)
 		if hit.extrafunc then
-			hit.extrafunc(v, hit, ofs, hx, hy, vflags)
+			hit.extrafunc(v, hit, offsets, hx, hy, vflags)
 		end
 
 		hy = $ + HEIGHT + multiheight
