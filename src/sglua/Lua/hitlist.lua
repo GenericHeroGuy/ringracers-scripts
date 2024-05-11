@@ -230,6 +230,23 @@ local ICONHEIGHT = 8
 local ICONOFFSET = FRACUNIT/2
 local V_100TRANS = V_50TRANS*2
 
+-- somebody disconnected? no problem, just replace them :^)
+local function CheckValid(hit)
+	if hit.source and not hit.source.valid then
+		hit.source = { name = "???", skincolor = 1, valid = true }
+	end
+	for target, combo in pairs(hit.targets) do
+		if not target.valid then
+			local dummy = { name = "???", skincolor = 1, valid = true }
+			hit.targets[dummy] = combo
+			hit.targets[target] = nil
+			for i = 0, #hit.targetorder do
+				if hit.targetorder[i] == target then hit.targetorder[i] = dummy end
+			end
+		end
+	end
+end
+
 local function GetOffsets(v, hit, vflags, font)
 	local w = 0
 	local ofs = {}
@@ -273,6 +290,8 @@ hud.add(function(v, p)
 	local tallest = 64
 
 	for i, hit in ipairs(hitlist) do
+		CheckValid(hit)
+
 		local hx = 56
 		-- TODO: V_SPLITSCREEN is broken (r_splitscreen never gets updated in HUD hooks)
 		local vflags = V_SNAPTOTOP|V_SNAPTOLEFT|V_SPLITSCREEN|(V_10TRANS*max(0, leveltime - hit.timetodie + 10))
