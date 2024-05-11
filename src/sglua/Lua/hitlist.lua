@@ -153,14 +153,18 @@ addHook("TouchSpecial", function(special, toucher)
 		inflictor = special,
 		source = master and master.player,
 		icon = "HL_HYUDORO",
-		rightpad = 7,
+		rightpad = 9,
 
 		hyuitem = K_GetItemPatch(toucher.player.itemtype, true),
+		hyuamount = toucher.player.itemamount,
 		extrafunc = function(v, hit, ofs, hx, hy, vflags)
 			local icon = v.cachePatch(hit.hyuitem)
 			local scale = FixedDiv(8, max(8, icon.height/2))
 			hx = $ + ofs.icon
-			v.drawScaled((hx+3)*FRACUNIT, (hy-3)*FRACUNIT, scale, icon, vflags, cmap)
+			v.drawScaled((hx+3)*FRACUNIT, (hy-3)*FRACUNIT - FRACUNIT/2, scale, icon, vflags, cmap)
+			if hit.hyuamount > 1 then
+				v.drawScaled((hx+14)*FRACUNIT, (hy+5)*FRACUNIT, FRACUNIT/2, v.cachePatch(string.format("PINGF%03d", 48 + hit.hyuamount % 10)), vflags)
+			end
 		end
 	})
 end, MT_HYUDORO)
