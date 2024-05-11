@@ -5,5 +5,7 @@ $output out/local.pk3
 
 Lua/itemtimers.lua
 Lua/driftgauge.lua
+Lua/hitlist.lua
 Graphics/Timer/**
 Graphics/DriftGauge/**
+Graphics/HitList/**
