@@ -70,7 +70,7 @@ addHook("PlayerThink", function(p)
     if cv_noffbounce.value == 0 or p.fastfallbounce then return end
 
     -- the actual bounce is delayed by a tic for some reason, so this works
-    if p.mo and p.mo.eflags & MFE_JUSTHITFLOOR and p.curshield ~= KSHIELD_BUBBLE then
+    if p.mo and p.mo.eflags & MFE_JUSTHITFLOOR and p.cmd.buttons & (BT_ACCELERATE|BT_BRAKE) and p.curshield ~= KSHIELD_BUBBLE then
         p.fastfall = 0
     end
 end)
