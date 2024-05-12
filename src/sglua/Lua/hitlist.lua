@@ -1,5 +1,6 @@
 -- HitList! not that this game has many item interactions lol
 -- by GenericHeroGuy
+-- icons by spee (thank you!)
 
 local cv_enabled = CV_RegisterVar({
 	name = "hitlist",
@@ -366,7 +367,7 @@ hud.add(function(v, p)
 		if hit.icon then
 			local icon = v.cachePatch(hit.icon)
 			local scale = FixedDiv(ICONHEIGHT, max(ICONHEIGHT, icon.height))
-			local cmap = v.getColormap(TC_DEFAULT, light and SKINCOLOR_BLACK or SKINCOLOR_WHITE)
+			local cmap = v.getColormap(TC_DEFAULT, SKINCOLOR_WHITE)
 			v.drawScaled((hx + offsets.icon)*FRACUNIT, (hy+multiheight/2)*FRACUNIT + ICONOFFSET, scale, icon, vflags, cmap)
 		end
 
