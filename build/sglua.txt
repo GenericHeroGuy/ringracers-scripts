@@ -2,7 +2,7 @@ $basepath src/sglua/
 $output out/sglua.pk3
 
 # needs to come first to accurately count slots
-Lua/freeslotstuff.lua
+Lua/Utils/freeslotstuff.lua
 
 Lua/**
 **
