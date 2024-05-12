@@ -52,13 +52,13 @@ end
 COM_AddCommand("trickregression", function(p, arg)
     if not arg then
         CONS_Printf(p, "Usage: trickregression yes/no")
-        CONS_Printf(p, "v2.2 trick behavior is "..(p.trickregression and "\131enabled" or "\133disabled"))
+        CONS_Printf(p, "pre-v2.2 trick behavior is "..(p.trickregression and "\131enabled" or "\133disabled"))
         return
     end
 
     p.trickregression = yesno(arg)
 
-    CONS_Printf(p, "v2.2 trick behavior is now "..(p.trickregression and "\131enabled" or "\133disabled"))
+    CONS_Printf(p, "pre-v2.2 trick behavior is now "..(p.trickregression and "\131enabled" or "\133disabled"))
 
     if cv_trick_regression_enabled.value == 0 then
         CONS_Printf(p, "\131NOTICE:\128 trick.lua is disabled by host")
@@ -76,30 +76,30 @@ local PF_TRICKDELAY = 1<<23
 -- Yes, this only works on PreThinkFrame.
 addHook("PreThinkFrame", function()
 	if cv_trick_regression_enabled.value == 0 then return end
-	
+
 	for player in players.iterate do
-		if player.trickregression then continue end
+		if not player.trickregression then continue end
 		if not player.mo then continue end
-		
+
 		-- handle regression delay
 		player.trickregressiondelay = $ or 0
-		
+
 		if player.trickpanel ~= TRICKSTATE_READY then continue end
-		
+
 		local cmd = player.cmd
 		local aimingcompare = abs(cmd.throwdir) - abs(cmd.turning)
-		
+
 		-- we trickin
 		if (aimingcompare < -TRICKTHRESHOLD) or (aimingcompare > TRICKTHRESHOLD) then
 			cmd.buttons = $ | BT_ACCELERATE
 			player.trickregressiondelay = 2
 		end
-		
+
 		-- intentionally not accelerate here
 		if player.trickregressiondelay <= 0 then
 			cmd.buttons = $ & ~BT_ACCELERATE
 		end
-		
+
 		player.trickregressiondelay = max(0, $ - 1)
 	end
 end)
