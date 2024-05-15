@@ -1,6 +1,6 @@
 -- HitList! not that this game has many item interactions lol
 -- by GenericHeroGuy
--- icons by spee (thank you!)
+-- icons by Spee (thank you!)
 
 local cv_enabled = CV_RegisterVar({
 	name = "hitlist",
@@ -64,6 +64,7 @@ local simple = {
 	[MT_GACHABOM] = "HL_GACHABOM",
 	[MT_INSTAWHIP] = "HL_INSTAWHIP",
 	[MT_SPB] = "HL_SPB",
+	[MT_SUPER_FLICKY] = "HL_SUPERFLICKY",
 }
 
 addHook("MobjDamage", function(target, inflictor, source, damage, damagetype)
@@ -91,6 +92,17 @@ addHook("MobjDamage", function(target, inflictor, source, damage, damagetype)
 			icon = "HL_BUBBLESHIELD"
 		elseif player.sneakertimer > 0 and not P_PlayerInPain(player) and player.flashing == 0 then
 			icon = "HL_SNEAKER"
+		-- battle!
+		elseif damagetype == DMG_TUMBLE then
+			-- target and inflictor here are actually the attacker
+			if target == inflictor then
+				icon = "HL_COUNTER"
+			elseif target.player.defenselockout == 1 then
+				icon = "HL_GUARDBREAK"
+			else
+				print("I THOUGHT THIS WAS BATTLE MODE")
+				return
+			end
 		else
 			print("uhhh what kinda player attack is this")
 			return
