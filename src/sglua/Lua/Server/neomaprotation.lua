@@ -271,9 +271,9 @@ addHook("ThinkFrame", function()
     local pfactor = 0
 
     for player in players.iterate do
-        if not player.spectator then
-            local pmo = player.mo
+        local pmo = player.mo
 
+        if pmo then
             pfactor = pfactor ^^ pmo.x ^^ pmo.y ^^ pmo.z
             pfactor = pfactor ^^ pmo.angle
             pfactor = pfactor ^^ (#skins[pmo.skin])
