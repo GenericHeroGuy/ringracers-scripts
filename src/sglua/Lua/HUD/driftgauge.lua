@@ -101,7 +101,7 @@ hud.add(function(v, p, c)
 
 	if not (p.mo and c.chase and cv_driftgauge.value and p.playerstate == PST_LIVE) then return end
 
-	local result = K_ObjectTracking(v, p, c, { x = p.mo.x, y = p.mo.y, z = p.mo.z + FixedMul(cv_driftgaugeofs.value, cv_driftgaugeofs.value > 0 and p.mo.scale or mapobjectscale) }, false)
+	local result = SG_ObjectTracking(v, p, c, { x = p.mo.x, y = p.mo.y, z = p.mo.z + FixedMul(cv_driftgaugeofs.value, cv_driftgaugeofs.value > 0 and p.mo.scale or mapobjectscale) }, false)
 	local basex, basey = result.x, result.y
 
 	local drifttrans = 0

@@ -29,7 +29,7 @@ end)
 local baseFov = 90*FRACUNIT
 local BASEVIDWIDTH = 320
 local BASEVIDHEIGHT = 200
-rawset(_G, "K_ObjectTracking", function(v, p, c, point, reverse)
+rawset(_G, "SG_ObjectTracking", function(v, p, c, point, reverse)
 	local cameraNum = c.pnum - 1
 	local viewx, viewy, viewz, viewangle, aimingangle, viewroll = SG_GetViewVars(v, p, c)
 
