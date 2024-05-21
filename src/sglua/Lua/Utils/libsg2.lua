@@ -1,7 +1,22 @@
 -- LIBSG v2: Mystery of the Missing Lua API
 
-local fovvars
+-- returns viewx, viewy, viewz, viewangle, aimingangle, viewroll
 local cv_tilting
+rawset(_G, "SG_GetViewVars", function(v, p, c)
+	if not cv_tilting then cv_tilting = CV_FindVar("tilting") end
+	local roll = p.viewrollangle + (cv_tilting.value and not (p.spectator --[[or c.freecam]]) and p.tilt or 0)
+
+	if p.awayviewtics then
+		local mo = p.awayviewmobj
+		return mo.x, mo.y, mo.z, mo.angle, mo.pitch, roll
+	elseif c.chase then
+		return c.x, c.y, c.z + c.height/2, c.angle, c.aiming, roll
+	elseif p.mo then
+		return p.mo.x, p.mo.y, p.viewz, p.mo.angle, p.aiming, roll
+	end
+end)
+
+local fovvars
 local function R_FOV(num)
 	if not fovvars then
 		fovvars = { [0] = CV_FindVar("fov"), CV_FindVar("fov2"), CV_FindVar("fov3"), CV_FindVar("fov4") }
@@ -19,6 +34,7 @@ local BASEVIDWIDTH = 320
 local BASEVIDHEIGHT = 200
 rawset(_G, "K_ObjectTracking", function(v, p, c, point, reverse)
 	local cameraNum = c.pnum - 1
+	local viewx, viewy, viewz, viewangle, aimingangle, viewroll = SG_GetViewVars(v, p, c)
 
 	// Initialize defaults
 	local result = {}
@@ -29,29 +45,13 @@ rawset(_G, "K_ObjectTracking", function(v, p, c, point, reverse)
 	// Take the view's properties as necessary.
 	local viewpointAngle, viewpointAiming, viewpointRoll
 	if reverse then
-		viewpointAngle = (c.angle + ANGLE_180)
-		viewpointAiming = InvAngle(c.aiming)
-		viewpointRoll = p.viewrollangle
+		viewpointAngle = viewangle + ANGLE_180
+		viewpointAiming = InvAngle(aimingangle)
+		viewpointRoll = viewroll
 	else
-		viewpointAngle = c.angle
-		viewpointAiming = c.aiming
-		viewpointRoll = InvAngle(p.viewrollangle)
-	end
-
-	-- the curse of libsg
-	local viewx, viewy, viewz
-	if p.awayviewtics then
-		viewx = p.awayviewmobj.x
-		viewy = p.awayviewmobj.y
-		viewz = p.awayviewmobj.z
-	elseif c.chase then
-		viewx = c.x
-		viewy = c.y
-		viewz = c.z + (p.mo.eflags & MFE_VERTICALFLIP and c.height)
-	else
-		viewx = p.mo.x
-		viewy = p.mo.y
-		viewz = p.viewz
+		viewpointAngle = viewangle
+		viewpointAiming = aimingangle
+		viewpointRoll = InvAngle(viewroll)
 	end
 
 	// Calculate screen size adjustments.
@@ -59,6 +59,8 @@ rawset(_G, "K_ObjectTracking", function(v, p, c, point, reverse)
 	local screenHeight = v.height()/v.dupy()
 
 	-- what's the difference between this and r_splitscreen?
+	-- future G: seems to alternate between view count and view number depending on where you are in the codebase
+	-- may i interest the Krew in stplyrnum? :^)
 	if splitscreen >= 2 then
 		// Half-wide screens
 		screenWidth = $ >> 1
