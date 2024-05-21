@@ -146,24 +146,10 @@ addHook("MobjDeath", function(target, inflictor, source, damagetype)
 	})
 end, MT_PLAYER)
 
--- hyudoro
-addHook("TouchSpecial", function(special, toucher)
-	if special.extravalue1 ~= 0 then return end -- HYU_PATROL
-
-	// Cannot hit its master
-	--                     center             center master
-	local master = special.target and special.target.target or nil
-	if toucher == master then return end
-
-	// Don't punish a punished player
-	if toucher.player.hyudorotimer then return end
-
-	// NO ITEM?
-	if not toucher.player.itemamount then return end
-
+SG_AddHook("HyudoroSteal", function(toucher, master, hyudoro)
 	AddHit({
 		target = toucher.player,
-		inflictor = special,
+		inflictor = hyudoro,
 		source = master and master.player,
 		icon = "HL_HYUDORO",
 		rightpad = 9,
@@ -180,31 +166,16 @@ addHook("TouchSpecial", function(special, toucher)
 			end
 		end
 	})
-end, MT_HYUDORO)
+end)
 
--- drop target
--- yoinked from hitlag
--- i really need to make a new libsg
-local function height(thing, tmthing)
-	return tmthing.z > thing.z + thing.height or tmthing.z + tmthing.height < thing.z
-end
-local function droptarget(thing, tmthing)
-	if height(thing, tmthing) then return end
-	if (thing.target == tmthing or thing.target == tmthing.target) and ((thing.threshold > 0 and tmthing.player) or (not tmthing.player and tmthing.threshold > 0)) then return end
-	if thing.health <= 0 or tmthing.health <= 0 then return end
-	if tmthing.player and (tmthing.player.hyudorotimer or tmthing.player.justbumped) then return end
-
-	if tmthing.player then
-		AddHit({
-			target = tmthing.player,
-			inflictor = thing,
-			source = thing.target and thing.target.player,
-			icon = "HL_DROPTARGET",
-		})
-	end
-end
-addHook("MobjCollide", droptarget, MT_DROPTARGET)
-addHook("MobjMoveCollide", droptarget, MT_DROPTARGET)
+SG_AddHook("DropTargetHit", function(thing, tmthing)
+	if tmthing.player then AddHit({
+		target = tmthing.player,
+		inflictor = thing,
+		source = thing.target and thing.target.player,
+		icon = "HL_DROPTARGET",
+	}) end
+end)
 
 -- WHAT THE FUCK AM I LOOKING AT!?
 -- ok so the problem with abusing MF2_ALREADYHIT is that if the player that gets hit

@@ -71,21 +71,10 @@ addHook("MobjDamage", function(target, inflictor, source, _, damagetype)
 	if inflictor and inflictor.player then tagged[inflictor.player] = true end
 end, MT_PLAYER)
 
-local function height(thing, tmthing)
-	return tmthing.z > thing.z + thing.height or tmthing.z + tmthing.height < thing.z
-end
-
-local function droptarget(thing, tmthing)
-	if height(thing, tmthing) then return end
-	if (thing.target == tmthing or thing.target == tmthing.target) and ((thing.threshold > 0 and tmthing.player) or (not tmthing.player and tmthing.threshold > 0)) then return end
-	if thing.health <= 0 or tmthing.health <= 0 then return end
-	if tmthing.player and (tmthing.player.hyudorotimer or tmthing.player.justbumped) then return end
-
+SG_AddHook("DropTargetHit", function(thing, tmthing)
 	if thing.player then tagged[thing.player] = true end
 	if tmthing.player then tagged[tmthing.player] = true end
-end
-addHook("MobjCollide", droptarget, MT_DROPTARGET)
-addHook("MobjMoveCollide", droptarget, MT_DROPTARGET)
+end)
 
 local function setlag(p, mult)
 	p.mo.hitlag = FixedMul($, mult.value)

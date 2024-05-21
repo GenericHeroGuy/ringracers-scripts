@@ -132,3 +132,49 @@ rawset(_G, "K_ObjectTracking", function(v, p, c, point, reverse)
 	result.y = $ - ((v.height()/v.dupy()) - BASEVIDHEIGHT)<<(FRACBITS-(splitscreen >= 1 and 2 or 1))
 	return result
 end)
+
+local hooks = {}
+rawset(_G, "SG_RegisterHook", function(name)
+	hooks[name] = {}
+end)
+rawset(_G, "SG_AddHook", function(name, func)
+	table.insert(hooks[name], { func = func })
+end)
+rawset(_G, "SG_RunHook", function(name, ...)
+	for i, hook in ipairs(hooks[name]) do
+		hook.func(...)
+	end
+end)
+
+SG_RegisterHook("DropTargetHit")
+local function height(thing, tmthing)
+	return tmthing.z > thing.z + thing.height or tmthing.z + tmthing.height < thing.z
+end
+local function droptarget(thing, tmthing)
+	if height(thing, tmthing) then return end
+	if (thing.target == tmthing or thing.target == tmthing.target) and ((thing.threshold > 0 and tmthing.player) or (not tmthing.player and tmthing.threshold > 0)) then return end
+	if thing.health <= 0 or tmthing.health <= 0 then return end
+	if tmthing.player and (tmthing.player.hyudorotimer or tmthing.player.justbumped) then return end
+
+	SG_RunHook("DropTargetHit", thing, tmthing)
+end
+addHook("MobjCollide", droptarget, MT_DROPTARGET)
+addHook("MobjMoveCollide", droptarget, MT_DROPTARGET)
+
+SG_RegisterHook("HyudoroSteal")
+addHook("TouchSpecial", function(special, toucher)
+	if special.extravalue1 ~= 0 then return end -- HYU_PATROL
+
+	// Cannot hit its master
+	--                     center             center master
+	local master = special.target and special.target.target or nil
+	if toucher == master then return end
+
+	// Don't punish a punished player
+	if toucher.player.hyudorotimer then return end
+
+	// NO ITEM?
+	if not toucher.player.itemamount then return end
+
+	SG_RunHook("HyudoroSteal", toucher, master, special)
+end, MT_HYUDORO)
