@@ -3,6 +3,7 @@ $output out/local.pk3
 
 # build script for addfilelocal use
 
+Lua/Utils/libsg2.lua
 Lua/HUD/itemtimers.lua
 Lua/HUD/driftgauge.lua
 Lua/HUD/hitlist.lua
