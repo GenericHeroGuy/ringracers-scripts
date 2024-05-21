@@ -17,15 +17,12 @@ rawset(_G, "SG_GetViewVars", function(v, p, c)
 end)
 
 local fovvars
-local function R_FOV(num)
+rawset(_G, "R_FOV", function(num)
 	if not fovvars then
 		fovvars = { [0] = CV_FindVar("fov"), CV_FindVar("fov2"), CV_FindVar("fov3"), CV_FindVar("fov4") }
 	end
 	return fovvars[num].value
-end
-local function AngleDeltaSigned(a1, a2)
-	return a1 - a2
-end
+end)
 
 // This version of the function was prototyped in Lua by Nev3r ... a HUGE thank you goes out to them!
 -- if only it was exposed
@@ -37,10 +34,12 @@ rawset(_G, "K_ObjectTracking", function(v, p, c, point, reverse)
 	local viewx, viewy, viewz, viewangle, aimingangle, viewroll = SG_GetViewVars(v, p, c)
 
 	// Initialize defaults
-	local result = {}
-	result.x, result.y = 0, 0
-	result.scale = FRACUNIT
-	result.onScreen = false
+	local result = {
+		x = 0,
+		y = 0,
+		scale = FRACUNIT,
+		onScreen = false
+	}
 
 	// Take the view's properties as necessary.
 	local viewpointAngle, viewpointAiming, viewpointRoll
@@ -88,8 +87,8 @@ rawset(_G, "K_ObjectTracking", function(v, p, c, point, reverse)
 
 	// Determine viewpoint factors.
 	local h = R_PointToDist2(point.x, point.y, viewx, viewy)
-	local da = AngleDeltaSigned(viewpointAngle, R_PointToAngle2(viewx, viewy, point.x, point.y))
-	local dp = AngleDeltaSigned(viewpointAiming, R_PointToAngle2(0, 0, h, viewz))
+	local da = viewpointAngle - R_PointToAngle2(viewx, viewy, point.x, point.y)
+	local dp = viewpointAiming - R_PointToAngle2(0, 0, h, viewz)
 
 	if reverse then da = -da end
 
@@ -117,7 +116,7 @@ rawset(_G, "K_ObjectTracking", function(v, p, c, point, reverse)
 
 	result.scale = FixedDiv(screenHalfW, h+1)
 
-	result.onScreen = not ((abs(da) > ANG60) or (abs(AngleDeltaSigned(viewpointAiming, R_PointToAngle2(0, 0, h, (viewz - point.z)))) > ANGLE_45))
+	result.onScreen = not ((abs(da) > ANG60) or (abs(viewpointAiming - R_PointToAngle2(0, 0, h, (viewz - point.z))) > ANGLE_45))
 
 	// Cheap dirty hacks for some split-screen related cases
 	if result.x < 0 or result.x > (screenWidth << FRACBITS) then
