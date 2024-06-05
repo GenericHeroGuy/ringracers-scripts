@@ -1,5 +1,29 @@
 -- LIBSG v2: Mystery of the Missing Lua API
 
+local escapes = {
+	["\\q"] = "\"",
+	["\\n"] = "\n",
+	["\\128"] = "\128",
+	["\\129"] = "\129",
+	["\\130"] = "\130",
+	["\\131"] = "\131",
+	["\\132"] = "\132",
+	["\\133"] = "\133",
+	["\\134"] = "\134",
+	["\\135"] = "\135",
+	["\\136"] = "\136",
+	["\\137"] = "\137",
+	["\\138"] = "\138",
+	["\\139"] = "\139",
+	["\\140"] = "\140",
+	["\\141"] = "\141",
+	["\\142"] = "\142",
+	["\\143"] = "\143",
+}
+rawset(_G, "SG_Escape", function(str)
+	return str:gsub("\\[%l%d][%d]?[%d]?", escapes)
+end)
+
 -- returns viewx, viewy, viewz, viewangle, aimingangle, viewroll
 local cv_tilting
 rawset(_G, "SG_GetViewVars", function(v, p, c)
