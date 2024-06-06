@@ -16,6 +16,7 @@ end)
 -- Not done yet with this when it comes to improvements
 
 -- Drawing system had to be re-done because that shit (v.drawPingNum) doesn't work in v1.6 for whatever reason, so numbers didn't show at all - Now does in Saturn v4!
+-- G from future: it works in v2.3 lol
 
 -- Feel free to take the fork if you like the improvements ;) - AnimeSonic
 -- Last update: November 4th, 2023
@@ -286,7 +287,7 @@ local function getTimeoverText(p)
         return "\133ELIMINATED"
     end
     
-    return "NO CONTEST"
+    return "RETIRED"
 end
 
 local function countPlayers()
@@ -617,8 +618,8 @@ local function drawBaseHud(v, spectators, extrafunc)
 			scroll = $ + ((consoleplayer.cmd.forwardmove > 0) and hm_scoreboard_scrollspeed.value or 0)
 			scroll = $ - ((consoleplayer.cmd.forwardmove < 0) and hm_scoreboard_scrollspeed.value or 0)
 		else
-			scroll = $ + ((consoleplayer.cmd.buttons & BT_BRAKE) and hm_scoreboard_scrollspeed.value or 0)
-			scroll = $ - ((consoleplayer.cmd.buttons & BT_ATTACK) and hm_scoreboard_scrollspeed.value or 0)
+			scroll = $ + ((consoleplayer.cmd.throwdir > 0) and hm_scoreboard_scrollspeed.value or 0)
+			scroll = $ - ((consoleplayer.cmd.throwdir < 0) and hm_scoreboard_scrollspeed.value or 0)
 		end
 	end
 	scroll = min(0, max($, maxscroll))
@@ -669,7 +670,7 @@ local function drawBaseHud(v, spectators, extrafunc)
 			status = "LAP "..p.laps
 		else
 			local t = p.realtime
-			status = (t/(60*TICRATE)).."' "..string.format("%02d", (t/TICRATE)%60)..'" '..string.format("%02d", G_TicsToCentiseconds(t))
+			status = string.format("%d'%02d\"%02d", t/(60*TICRATE), (t/TICRATE)%60, G_TicsToCentiseconds(t))
 		end
 		if p.exiting and not color then color = hilicol end
 		v.drawString(morespace and 295 or 157, hy, status, V_6WIDTHSPACE|specflag|color, "thin-right")
@@ -779,7 +780,7 @@ local function drawBaseHud(v, spectators, extrafunc)
 		end
 
 		-- ping
-		if (p ~= server and netgame) or p._finallatency then
+		if (p ~= server and netgame and not p.bot) or p._finallatency then
 			local ping = max(p.ping, p._finallatency or 0)
 			if hm_scoreboard_pingdisplay.value and ping < 10 then
 				local cmap = v.getColormap(TC_RAINBOW, pingcolors[pingtable[ping]])
@@ -1009,38 +1010,6 @@ hud.add(function(v, p)
 		x = $ + 7
 	end
 end)
-	
-
--- v.drawPingNum is broken so i'm making my own
--- (actually it is almost exact copy of V_DrawPingNum from kart source, no idea why is it broken)
-local num_patches = nil
-local function drawPingNum(v, x, y, num, flags)
-	x = x - 3 -- Idk why i have to do this but without that numbers have weird offset
-
-	if not num_patches then
-		num_patches = {}
-
-		for i = 0, 9 do
-			num_patches[i] = v.cachePatch("PINGN"..i)
-		end
-	end
-
-	local w = num_patches[0].width
-
-	if num == 0 then
-		v.drawScaled(x<<FRACBITS, y<<FRACBITS, FRACUNIT, num_patches[0], flags)
-	else
-		if num < 0 then num = -num end
-
-		while num ~= 0 do
-			local digit = num % 10
-			num = num / 10
-
-			v.drawScaled(x<<FRACBITS, y<<FRACBITS, FRACUNIT, num_patches[digit], flags)
-			x = x - (w-1)
-		end
-	end
-end
 
 local miniitemgfx
 local sadface
@@ -1099,7 +1068,7 @@ hud.add(function(v)
 			local irolls = log[itype]
 			if irolls then
 				local ir_length = #tostring(irolls)
-				drawPingNum(v, dx+8+(max(0, ir_length - 1)*5), y+2, irolls, 0)
+				v.drawPingNum((dx+9+max(0, ir_length - 1)*5)<<FRACBITS, (y+2)<<FRACBITS, irolls, 0)
 				dx = $ + 10 + max(0, (ir_length*5)-5) + ITEMLOG_SPACE
 			end
 		end
