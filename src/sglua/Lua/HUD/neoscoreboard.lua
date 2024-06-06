@@ -768,8 +768,9 @@ local function drawBaseHud(v, spectators, extrafunc)
 		end
 
 		-- restat
-		if (p.hostmod and p.hostmod.restat) or hm_scoreboard_verbosestats.value then
-			local restatflag = (hm_scoreboard_verbosestats.value and p.hostmod.restat) and V_YELLOWMAP or 0
+		local restatted = p.hostmod and p.hostmod.restat and p.hostmod.restat.speed ~= 0
+		if restatted or hm_scoreboard_verbosestats.value then
+			local restatflag = (hm_scoreboard_verbosestats.value and restatted) and V_YELLOWMAP or 0
 			v.drawString(29-pushx+hscroll, hy, p.kartspeed, restatflag, "small")
 			v.drawString(39-pushx+hscroll, hy+6, p.kartweight, restatflag, "small-right")
 		end
@@ -1033,6 +1034,7 @@ hud.add(function(v)
 	end
 	hud.disable("intermissionmessages") -- = intermissiontally
 
+	v.fadeScreen(31, 3)
 	faketimer = $ + 1
 
 	if inttime > sorttic then
