@@ -162,6 +162,7 @@ local hm_motd_contact = CV_RegisterVar({
 local pingtable = { [0] = 1, 1, 2, 2, 3, 3, 3, 4, 4, 4 }
 local pingcolors = { SKINCOLOR_CYAN, SKINCOLOR_SWAMP, SKINCOLOR_YELLOW, SKINCOLOR_ROSE }
 local scroll, maxscroll = 0, 0
+local hscroll = 0
 local namescroll, namescrolltimer = 0, TICRATE
 local scrollreset = 0
 
@@ -628,10 +629,10 @@ local function drawBaseHud(v, spectators, extrafunc)
 
 	-- draw line between players and info
 	local duptweak = (scrwidth - 320)/2 -- BASEDVIDWIDTH = 320 (based on what?)
-	v.drawFill(1-duptweak, scroll+26, scrwidth-2, 1, 0) -- horizontal
+	v.drawFill(1-duptweak+hscroll, scroll+26, scrwidth-2, 1, 0) -- horizontal
 	
 	if not morespace then
-		v.drawFill(160, scroll+26, 1, 162+(-scroll), 0) -- vertical
+		v.drawFill(160+hscroll, scroll+26, 1, 162-scroll, 0) -- vertical
 	end
 
 	local playerranks = getPlayerRanks(spectators)
@@ -673,7 +674,7 @@ local function drawBaseHud(v, spectators, extrafunc)
 			status = string.format("%d'%02d\"%02d", t/(60*TICRATE), (t/TICRATE)%60, G_TicsToCentiseconds(t))
 		end
 		if p.exiting and not color then color = hilicol end
-		v.drawString(morespace and 295 or 157, hy, status, V_6WIDTHSPACE|specflag|color, "thin-right")
+		v.drawString((morespace and 295 or 157) + hscroll, hy, status, V_6WIDTHSPACE|specflag|color, "thin-right")
 		local statuswidth = v.stringWidth(status, V_6WIDTHSPACE, "thin")
 
 		-- player name
@@ -730,10 +731,10 @@ local function drawBaseHud(v, spectators, extrafunc)
 
 		-- scroll name, push clan to the left
 		if clipname then
-			v.drawString(39 - pushx, hy, clan, V_6WIDTHSPACE|specflag, "thin")
-			v.drawString(clanwidth + 39 - pushx - namescr + leftscr, hy, fugname, V_6WIDTHSPACE|specflag, "thin")
+			v.drawString(39 - pushx + hscroll, hy, clan, V_6WIDTHSPACE|specflag, "thin")
+			v.drawString(clanwidth + 39 - pushx - namescr + leftscr + hscroll, hy, fugname, V_6WIDTHSPACE|specflag, "thin")
 		else
-			v.drawString(39 - pushx, hy, clan..fugname, V_6WIDTHSPACE|specflag, "thin")
+			v.drawString(39 - pushx + hscroll, hy, clan..fugname, V_6WIDTHSPACE|specflag, "thin")
 		end
 
 		-- icon
@@ -759,24 +760,24 @@ local function drawBaseHud(v, spectators, extrafunc)
 			dieflag = V_50TRANS
 		end
 
-		v.drawScaled((30-pushx)<<FRACBITS, (hy+1)<<FRACBITS, FRACUNIT/2/downscale, pp, specflag|dieflag, cmap)
+		v.drawScaled((30-pushx+hscroll)<<FRACBITS, (hy+1)<<FRACBITS, FRACUNIT/2/downscale, pp, specflag|dieflag, cmap)
 
 		-- highlight consoleplayer
 		if not replayplayback and p == consoleplayer and splitscreen == 0 then
-			v.drawScaled((30-pushx)<<FRACBITS, (hy+1)<<FRACBITS, FRACUNIT/2, v.cachePatch("k_chili"..((faketimer / 4) % 8)+1), specflag|dieflag)
+			v.drawScaled((30-pushx+hscroll)<<FRACBITS, (hy+1)<<FRACBITS, FRACUNIT/2, v.cachePatch("k_chili"..((faketimer / 4) % 8)+1), specflag|dieflag)
 		end
 
 		-- restat
 		if (p.hostmod and p.hostmod.restat) or hm_scoreboard_verbosestats.value then
 			local restatflag = (hm_scoreboard_verbosestats.value and p.hostmod.restat) and V_YELLOWMAP or 0
-			v.drawString(29-pushx, hy, p.kartspeed, restatflag, "small")
-			v.drawString(39-pushx, hy+6, p.kartweight, restatflag, "small-right")
+			v.drawString(29-pushx+hscroll, hy, p.kartspeed, restatflag, "small")
+			v.drawString(39-pushx+hscroll, hy+6, p.kartweight, restatflag, "small-right")
 		end
 
 		-- rank
 		if (not p.spectator) or eliminated then
 			local pos = eliminated and p.elim.eliminatedpos or p.position
-			v.drawString(29-pushx, hy+1, pos, 0, "right")
+			v.drawString(29-pushx+hscroll, hy+1, pos, 0, "right")
 		end
 
 		-- ping
@@ -784,10 +785,10 @@ local function drawBaseHud(v, spectators, extrafunc)
 			local ping = max(p.ping, p._finallatency or 0)
 			if hm_scoreboard_pingdisplay.value and ping < 10 then
 				local cmap = v.getColormap(TC_RAINBOW, pingcolors[pingtable[ping]])
-				v.draw(3-pushx, hy+1, v.cachePatch("PINGD"), specflag, cmap)
-				v.draw(7-pushx, hy+1, v.cachePatch("PINGN"..ping), specflag, cmap)
+				v.draw(3-pushx+hscroll, hy+1, v.cachePatch("PINGD"), specflag, cmap)
+				v.draw(7-pushx+hscroll, hy+1, v.cachePatch("PINGN"..ping), specflag, cmap)
 			else
-				v.draw(3-pushx, hy, v.cachePatch("PINGGFX"..(pingtable[ping] or 5)), specflag)
+				v.draw(3-pushx+hscroll, hy, v.cachePatch("PINGGFX"..(pingtable[ping] or 5)), specflag)
 			end
 		end
 
@@ -832,6 +833,7 @@ hud.add(function(v)
 	end
 	hud.disable("intermissiontally") -- = rankings
 
+	hscroll = 0
 	faketimer = $ + 1
 
 	-- XXX: you cannot access NOSHOWHELP vars at all
@@ -1015,14 +1017,35 @@ local miniitemgfx
 local sadface
 local INVFRAMES = { [0] = "K_ISINV1", "K_ISINV2", "K_ISINV3", "K_ISINV4", "K_ISINV5", "K_ISINV6" }
 
+local inttime, sorttic
+addHook("MapChange", function() inttime = 0 end)
+addHook("IntermissionThinker", function()
+	if inttime == 0 then
+		sorttic = max((CV_FindVar("inttime").value*TICRATE/2) - 2*TICRATE, 2*TICRATE)
+	end
+	inttime = $ + 1
+end)
+
 hud.add(function(v)
-	if not (hm_scoreboard.value and hm_scoreboard_local.value) then
+	if not (netgame and hm_scoreboard.value and hm_scoreboard_local.value) then
 		hud.enable("intermissionmessages") -- = intermissiontally
 		return
 	end
 	hud.disable("intermissionmessages") -- = intermissiontally
 
 	faketimer = $ + 1
+
+	if inttime > sorttic then
+		local count = inttime - sorttic
+		if count <= 8
+			hscroll = -((count * BASEVIDWIDTH) / 8)
+		else
+			hud.enable("intermissionmessages") -- = intermissiontally
+			return
+		end
+	else
+		hscroll = 0
+	end
 
 	if not miniitemgfx then
 		miniitemgfx = {}
@@ -1056,7 +1079,7 @@ hud.add(function(v)
 		for itype = 1, NUMKARTITEMS do
 			local irolls = log[itype]
 			if irolls then
-				v.drawScaled((dx<<FRACBITS) - (25*FRACUNIT/4), (y<<FRACBITS) - (25*FRACUNIT/4), FRACUNIT/2, miniitemgfx[itype] or sadface)
+				v.drawScaled((dx+hscroll)*FRACUNIT - (25*FRACUNIT/4), y*FRACUNIT - (25*FRACUNIT/4), FRACUNIT/2, miniitemgfx[itype] or sadface)
 				dx = $ + 10 + max(0, (#tostring(irolls)*5)-5) + ITEMLOG_SPACE
 			end
 		end
@@ -1068,28 +1091,28 @@ hud.add(function(v)
 			local irolls = log[itype]
 			if irolls then
 				local ir_length = #tostring(irolls)
-				v.drawPingNum((dx+9+max(0, ir_length - 1)*5)<<FRACBITS, (y+2)<<FRACBITS, irolls, 0)
+				v.drawPingNum((dx+9+hscroll+(max(0, ir_length - 1)*5))<<FRACBITS, (y+2)<<FRACBITS, irolls, 0)
 				dx = $ + 10 + max(0, (ir_length*5)-5) + ITEMLOG_SPACE
 			end
 		end
 
 		-- draw spray
 		if hm_itemanalyze_spray.value and p.spray then
-			v.drawScaled((dx+12)<<FRACBITS, (y)<<FRACBITS, FRACUNIT/2, v.cachePatch("SPRAYCAN"), 0, v.getColormap(TC_DEFAULT, p.skincolor))
+			v.drawScaled((dx+12+hscroll)*FRACUNIT, y*FRACUNIT, FRACUNIT/2, v.cachePatch("SPRAYCAN"), 0, v.getColormap(TC_DEFAULT, p.skincolor))
 		end
 	end)
 
 	-- add a notch to the top separator
-	v.drawFill(160, scroll+14, 1, 12, 0)
+	v.drawFill(160+hscroll, scroll+14, 1, 12, 0)
 
 	-- draw level name
-	v.drawString(BASEVIDWIDTH/2, scroll+4, (encoremode and "* \129ENCORE\128 " or "* ")..getMapTitle().." *", 0, "center")
+	v.drawString(BASEVIDWIDTH/2+hscroll, scroll+4, (encoremode and "* \129ENCORE\128 " or "* ")..getMapTitle().." *", 0, "center")
 
 	local hilicol = getHighlightColor()
-	v.drawString(RANK_OFFS, scroll+16, "#", hilicol, "right")
-	v.drawString(RANK_OFFS+10, scroll+16, "Name", hilicol)
-	v.drawString(STATUS_OFFS, scroll+16, "Time", hilicol, "right")
-	v.drawString(ITEMLOG_X+4, scroll+16, "Rolls", hilicol)
+	v.drawString(RANK_OFFS+hscroll, scroll+16, "#", hilicol, "right")
+	v.drawString(RANK_OFFS+10+hscroll, scroll+16, "Name", hilicol)
+	v.drawString(STATUS_OFFS+hscroll, scroll+16, "Time", hilicol, "right")
+	v.drawString(ITEMLOG_X+4+hscroll, scroll+16, "Rolls", hilicol)
 
 	--[[
 	if server.hmfinishtimer ~= nil then
