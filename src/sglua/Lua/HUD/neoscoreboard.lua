@@ -169,9 +169,8 @@ local fadetime = 0
 
 local BASEVIDWIDTH = 320
 local BASEVIDHEIGHT = 200
-local ITEMLOG_X = BASEVIDWIDTH/2
-local ICON_WIDTH = 10
-local ITEMLOG_SPACE = 2
+local ITEMLOG_X = BASEVIDWIDTH/2 + 3
+local ITEMLOG_SPACE = 12
 
 local scoreboardmessages = {}
 -- mods are now provided by the server host
@@ -582,6 +581,11 @@ addHook("PlayerThink", function(p)
 		log[rolleditem] = ($ or 0) + max(1, p.itemamount)
 	end
 	log.lastrolled = rolleditem
+
+	if not log.rings then log.rings = {} end
+	if p.ringboxdelay == 1 then
+		log.rings[p.ringboxaward] = ($ or 0) + 1
+	end
 end)
 
 addHook("MapLoad", function()
@@ -1037,9 +1041,11 @@ hud.add(function(v, p, c)
 	end
 end)
 
-local miniitemgfx
+local miniitemgfx, ringboxgfx
 local sadface
+local mdnum
 local INVFRAMES = { [0] = "K_ISINV1", "K_ISINV2", "K_ISINV3", "K_ISINV4", "K_ISINV5", "K_ISINV6" }
+local RINGBOXES = { [0] = "K_SBBAR", "K_SBBAR2", "K_SBBAR3", "K_SBRING", "K_SBSEV", "K_SBJACK" }
 
 local inttime, sorttic
 addHook("MapChange", function() inttime = 0 end)
@@ -1072,12 +1078,23 @@ hud.add(function(v)
 		hscroll = 0
 	end
 
+	-- cache graphics
 	if not miniitemgfx then
 		miniitemgfx = {}
 		for i = 1, NUMKARTITEMS do
 			miniitemgfx[i] = v.cachePatch(K_GetItemPatch(i, true))
 		end
 		sadface = v.cachePatch(K_GetItemPatch(KITEM_SAD, true))
+
+		ringboxgfx = {}
+		for i = 0, #RINGBOXES do
+			ringboxgfx[i] = v.cachePatch(RINGBOXES[i])
+		end
+
+		mdnum = {}
+		for i = 48, 57 do
+			mdnum[i] = v.cachePatch(fmt("MDFN%03d", i))
+		end
 	end
 	-- animate invincibility
 	miniitemgfx[KITEM_INVINCIBILITY] = v.cachePatch(INVFRAMES[faketimer % (3 * #INVFRAMES) / 3])
@@ -1098,32 +1115,39 @@ hud.add(function(v)
 		local log = p.itemlog
 		if not log then return end
 
-		local dx = ITEMLOG_X+4
-
 		-- draw item icons
+		local dx = ITEMLOG_X + hscroll
+		local amounts = {}
 		for itype = 1, NUMKARTITEMS do
 			local irolls = log[itype]
 			if irolls then
-				v.drawScaled((dx+hscroll)*FRACUNIT - (25*FRACUNIT/4), y*FRACUNIT - (25*FRACUNIT/4), FRACUNIT/2, miniitemgfx[itype] or sadface)
-				dx = $ + 10 + max(0, (#tostring(irolls)*5)-5) + ITEMLOG_SPACE
+				v.drawScaled(dx<<FRACBITS - 25*FRACUNIT/4, y<<FRACBITS - 25*FRACUNIT/4, FRACUNIT/2, miniitemgfx[itype] or sadface)
+				dx = $ + ITEMLOG_SPACE
+				amounts[dx] = irolls
+			end
+		end
+		for itype = 0, #RINGBOXES do
+			local irolls = log.rings[itype]
+			if irolls then
+				v.drawScaled(dx<<FRACBITS - 8*FRACUNIT/4, y<<FRACBITS - 8*FRACUNIT/4, FRACUNIT/2, ringboxgfx[itype] or sadface)
+				dx = $ + ITEMLOG_SPACE
+				amounts[dx] = irolls
 			end
 		end
 
-		dx = ITEMLOG_X+4
-
 		-- draw item amounts
-		for itype = 1, NUMKARTITEMS do
-			local irolls = log[itype]
-			if irolls then
-				local ir_length = #tostring(irolls)
-				v.drawPingNum((dx+9+hscroll+(max(0, ir_length - 1)*5))<<FRACBITS, (y+2)<<FRACBITS, irolls, 0)
-				dx = $ + 10 + max(0, (ir_length*5)-5) + ITEMLOG_SPACE
+		for x, irolls in pairs(amounts) do
+			local num = tostring(irolls)
+			x = x - 5
+			for i = #num, 1, -1 do
+				v.drawScaled(x<<FRACBITS, (y+4)<<FRACBITS, FRACUNIT/2, mdnum[num:byte(i)])
+				x = x - 3
 			end
 		end
 
 		-- draw spray
 		if hm_itemanalyze_spray.value and p.spray then
-			v.drawScaled((dx+12+hscroll)*FRACUNIT, y*FRACUNIT, FRACUNIT/2, v.cachePatch("SPRAYCAN"), 0, v.getColormap(TC_DEFAULT, p.skincolor))
+			v.drawScaled((dx+12)*FRACUNIT, y*FRACUNIT, FRACUNIT/2, v.cachePatch("SPRAYCAN"), 0, v.getColormap(TC_DEFAULT, p.skincolor))
 		end
 	end)
 
