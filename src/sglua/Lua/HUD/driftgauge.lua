@@ -51,28 +51,16 @@ local cv_driftgaugecolorized = CV_RegisterVar({
 local cv_colorizedhud
 local cv_colorizedhudcolor
 
--- Latest saturn would have better functions for this but before release i do it like that for now
-local function useColorizedHud()
-    if cv_colorizedhud == nil then
-        cv_colorizedhud = CV_FindVar("colorizedhud") or false
-        cv_colorizedhudcolor = CV_FindVar("colorizedhudcolor") or false
-    end
-
-    if cv_colorizedhud then
-        return cv_colorizedhud.value ~= cv_driftgaugecolorized.value
-    end
-
-    return cv_driftgaugecolorized.value
+local function useColorizedHud(v)
+	return v.useColorHud and v.useColorHud() ~= (cv_driftgaugecolorized.value == 1)
 end
 
 local function getBackgroundPatch(v)
-    return v.cachePatch(useColorizedHud() and "K_DGAUC" or "K_DGAU")
+    return v.cachePatch(useColorizedHud(v) and "K_NDGAUC" or "K_NDGAU")
 end
 
 local function getBackgroundColormap(v, p)
-    if not useColorizedHud() then return end
-
-    return v.getColormap(TC_RAINBOW, cv_colorizedhudcolor and cv_colorizedhudcolor.value or p.skincolor)
+	return useColorizedHud(v) and v.getColormap(TC_RAINBOW, v.getHudColor()) or nil
 end
 
 local function stringdraw(v, x, y, str, flags, colormap)
@@ -92,6 +80,14 @@ local lineofs = { 0, 0, 2, 2, 0, 0 }
 local colors = { 100, 100, 97, 97, 100, 100 }
 local BAR_WIDTH = 46
 local clipcounts = { 0, 1, 2, 7 }
+
+addHook("MapChange", function()
+	for p in pairs(aftertime) do
+		aftertime[p] = nil
+		afterval[p] = nil
+	end
+end)
+
 hud.add(function(v, p, c)
     if cv_kartdriftgauge == nil then
         cv_kartdriftgauge = CV_FindVar("kartdriftgauge") or false
@@ -104,10 +100,7 @@ hud.add(function(v, p, c)
 	local result = SG_ObjectTracking(v, p, c, { x = p.mo.x, y = p.mo.y, z = p.mo.z + FixedMul(cv_driftgaugeofs.value, cv_driftgaugeofs.value > 0 and p.mo.scale or mapobjectscale) }, false)
 	local basex, basey = result.x, result.y
 
-	local drifttrans = 0
-	if string.find(VERSIONSTRING:lower(), "saturn") and cv_driftgaugetrans.value then -- only use this in saturn since other clients dont support translucent drawfill or stuff will look off!
-		drifttrans = v.localTransFlag()
-	end
+	local drifttrans = cv_driftgaugetrans.value and v.localTransFlag() or 0
 
 	-- afterimage
 	if aftertime[p] then
