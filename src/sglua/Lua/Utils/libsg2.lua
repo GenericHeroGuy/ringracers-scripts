@@ -202,3 +202,35 @@ addHook("TouchSpecial", function(special, toucher)
 
 	SG_RunHook("HyudoroSteal", toucher, master, special)
 end, MT_HYUDORO)
+
+SG_RegisterHook("ReplayArchive")
+local loading, rp = false
+addHook("MapChange", function() loading = true end)
+addHook("MapLoad", function() loading = false end)
+addHook("PlayerSpawn", function()
+	if not loading or isdedicatedserver then return end
+	if replayplayback then
+		if not (rp and rp.valid) then
+			for p in players.iterate do
+				if p.sgreplay then
+					rp = p
+					--print("Loading replay data from "..rp.name)
+					break
+				end
+			end
+		end
+		SG_RunHook("ReplayArchive", function()
+			return table.remove(rp.sgreplay, 1)
+		end)
+	else
+		if not (rp and rp.valid) then
+			rp = consoleplayer
+			rp.sgreplay = {}
+			--print("Saving replay data to "..rp.name)
+		end
+		SG_RunHook("ReplayArchive", function(var)
+			table.insert(rp.sgreplay, var)
+			return var
+		end)
+	end
+end)

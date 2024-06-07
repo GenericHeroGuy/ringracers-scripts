@@ -511,10 +511,12 @@ COM_AddCommand("hm_scoreboard_clearmods", function(p)
 	CONS_Printf(p, "Cleared all mods")
 end, COM_ADMIN)
 
-addHook("NetVars", function(sync)
+local function saveMessages(sync)
 	scoreboardmessages = sync($)
 	balancechanges = sync($)
-end)
+end
+addHook("NetVars", saveMessages)
+SG_AddHook("ReplayArchive", saveMessages)
 
 addHook("ThinkFrame", function()
 	if leveltime == 0 then return end
@@ -595,9 +597,6 @@ addHook("MapLoad", function()
 
 	scroll = maxscroll
 	--server.hmfinishstate = false
-
-	--scoreboardmessages = SG_Archive($)
-	--balancechanges = SG_Archive($)
 end)
 
 local cv_menuhighlight -- :^)
