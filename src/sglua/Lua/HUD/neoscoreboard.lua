@@ -278,6 +278,14 @@ local function getPlayerRanks(spectators)
         end
     end
 
+	-- XXX: the dedicated server now shows up in players.iterate
+	for i, p in pairs(playerranks) do
+		if p == server and not p.mo then
+			table.remove(playerranks, i)
+			break
+		end
+	end
+
     return playerranks
 end
 
@@ -729,7 +737,7 @@ local function drawBaseHud(v, spectators, extrafunc)
 		-- highlight displayplayer names
 		for dp in displayplayers.iterate do
 			if dp == p then
-				fugname = string.char(128 + (skincolors[p.skincolor].chatcolor >> V_CHARCOLORSHIFT))..$
+				fugname = string.char(128 + (skincolors[p.skincolor or 1].chatcolor >> V_CHARCOLORSHIFT))..$
 				break
 			end
 		end
