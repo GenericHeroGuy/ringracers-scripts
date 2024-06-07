@@ -105,7 +105,7 @@ local hm_scoreboard_highresportrait = CONFIG_RegisterVar{
 }
 local hm_scoreboard_showmapid = CONFIG_RegisterVar{
 	name = "hm_scoreboard_showmapid",
-	defaultvalue = "Off",
+	defaultvalue = "On",
 	possiblevalue = CV_OnOff,
 
 	config_menu = "Hostmod",
@@ -147,14 +147,14 @@ local hm_scoreboard_linespacing = CV_RegisterVar({
 	flags = CV_NETVAR,
 	possiblevalue = { MIN = 1, MAX = 10 }
 })
-
-local hm_motd_name = CV_RegisterVar({
-	name = "hm_motd_name",
+local hm_scoreboard_logo = CV_RegisterVar({
+	name = "hm_scoreboard_logo",
 	defaultvalue = "",
 	flags = CV_NETVAR
 })
-local hm_motd_contact = CV_RegisterVar({
-	name = "hm_motd_contact",
+
+local hm_scoreboard_title = CV_RegisterVar({
+	name = "hm_scoreboard_title",
 	defaultvalue = "",
 	flags = CV_NETVAR
 })
@@ -165,18 +165,19 @@ local scroll, maxscroll = 0, 0
 local hscroll = 0
 local namescroll, namescrolltimer = 0, TICRATE
 local scrollreset = 0
+local fadetime = 0
 
 local BASEVIDWIDTH = 320
 local BASEVIDHEIGHT = 200
 local ITEMLOG_X = BASEVIDWIDTH/2
-local STATUS_OFFS = 157
-local RANK_OFFS = 29
 local ICON_WIDTH = 10
 local ITEMLOG_SPACE = 2
 
 local scoreboardmessages = {}
 -- mods are now provided by the server host
 local balancechanges = {}
+
+local fmt = string.format
 
 local cv_highresportrait
 local function useHighresPortrait()
@@ -574,6 +575,7 @@ end)
 
 addHook("PlayerThink", function(p)
 	local log = p.itemlog
+	if not log then return end
 
 	local rolleditem = p.itemtype
 	if rolleditem > 0 and log.lastrolled ~= rolleditem then
@@ -627,12 +629,12 @@ local function drawBaseHud(v, spectators, extrafunc)
 
 	local scrwidth = gamestate == GS_LEVEL and v.width()/v.dupx() or 320
 
-	-- draw line between players and info
-	local duptweak = (scrwidth - 320)/2 -- BASEDVIDWIDTH = 320 (based on what?)
-	v.drawFill(1-duptweak+hscroll, scroll+26, scrwidth-2, 1, 0) -- horizontal
-	
 	if not morespace then
-		v.drawFill(160+hscroll, scroll+26, 1, 162-scroll, 0) -- vertical
+		-- we don't overdraw in this house
+		v.drawFill(159+hscroll, 14, 1, 1, 65)
+		v.drawFill(159+hscroll, 15, 1, 169, 72)
+		v.drawFill(159+hscroll, 184, 1, 1, 65)
+		v.drawFill(160+hscroll, 14, 1, 171, 62)
 	end
 
 	local playerranks = getPlayerRanks(spectators)
@@ -641,7 +643,7 @@ local function drawBaseHud(v, spectators, extrafunc)
 
 	-- draw players
 	for rank, p in ipairs(playerranks) do
-		local hy = 28 + scroll + (rank-1)*10
+		local hy = 20 + (#playerranks > 16 and scroll or 0) + (rank-1)*10 + max(16 - #playerranks, 0)*5
 		local eliminated = Elimination and p.elim.iseliminated
 		local specflag = ((p.spectator or p.rs_check2) and not eliminated) and V_50TRANS or 0
 		local color = 0
@@ -755,7 +757,7 @@ local function drawBaseHud(v, spectators, extrafunc)
 		end
 		local dieflag = 0
 
-		if gamestate == GS_LEVEL and gametype == GT_BATTLE and p.mo.health <= 0 then
+		if gamestate == GS_LEVEL and gametype == GT_BATTLE and p.mo and p.mo.health <= 0 then
 			cmap = v.getColormap(TC_RAINBOW, SKINCOLOR_GREY)
 			dieflag = V_50TRANS
 		end
@@ -777,8 +779,15 @@ local function drawBaseHud(v, spectators, extrafunc)
 
 		-- rank
 		if (not p.spectator) or eliminated then
-			local pos = eliminated and p.elim.eliminatedpos or p.position
-			v.drawString(29-pushx+hscroll, hy+1, pos, 0, "right")
+			-- i have some peculiar requirements for the patch offsets
+			local pos = tostring(eliminated and p.elim.eliminatedpos or p.position)
+			local x = -8
+			for i = #pos, 1, -1 do
+				local patch = v.cachePatch(fmt("STCFN%03d", pos:byte(i)))
+				x = x - (i < #pos and patch.leftoffset or 0)
+				v.draw(29-pushx+hscroll+x, hy+1, patch)
+				x = x - 7
+			end
 		end
 
 		-- ping
@@ -819,14 +828,33 @@ local function drawBaseHud(v, spectators, extrafunc)
 	return (#playerranks - 16) * -10
 end
 
-local function getMapTitle()
-	return G_BuildMapTitle(gamemap)..(hm_scoreboard_showmapid.value and " - "..G_BuildMapName(gamemap) or "")
+local speeds, fourthgear = { [0] = "G1", "G2", "G3", "G4" }
+local function getGametypeStrings(gt)
+	-- TODO: custom gametypes
+	local left, right = "", ""
+	local hcol = 128 + getHighlightColor() >> V_CHARCOLORSHIFT
+	if gt == GT_RACE then
+		-- XXX: you cannot access NOSHOWHELP vars at all
+		--if not fourthgear then fourthgear = CV_FindVar("4thgear") end
+		left = fmt("Laps %c%d", hcol, numlaps)
+		right = fmt("Speed %c%s", hcol, speeds[--[[fourthgear.value and 3 or--]] gamespeed])
+	elseif gt == GT_BATTLE then
+		if timelimit > 0 then
+			if leveltime <= timelimit + starttime then
+				left = fmt("Time %c%d", hcol, min(timelimit, timelimit + starttime + 1 - leveltime) / TICRATE)
+			elseif (consoleplayer.valid and not consoleplayer.exiting) and leveltime > timelimit + starttime + TICRATE/2 and CV_FindVar("overtime").value then
+				left = fmt("Time %cOVERTIME", hcol)
+			end
+		end
+		if pointlimit > 0 then
+			right = fmt("Goal %c%d", hcol, pointlimit)
+		end
+	end
+	return left, right
 end
 
 -- hacked-up TSR scoreboard, WHEEEEEEEEEEEEEEE
 -- thanks snu
-local speeds = { [0] = "Gear 1", "Gear 2", "Gear 3" }
-local fourthgear
 hud.add(function(v)
 	if not (hm_scoreboard.value and hm_scoreboard_local.value) then
 		hud.enable("intermissiontally") -- = rankings
@@ -837,52 +865,29 @@ hud.add(function(v)
 	hscroll = 0
 	faketimer = $ + 1
 
-	-- XXX: you cannot access NOSHOWHELP vars at all
-	--if not fourthgear then fourthgear = CV_FindVar("4thgear") end
-
 	local hilicol = getHighlightColor()
 
-	v.fadeScreen(0xFF00, 16)
+	fadetime = min($ + 1, 5)
+	v.fadeScreen(31, fadetime)
 
 	-- draw the base HUD and get the max scroll for players
 	local pscroll = drawBaseHud(v, true)
 
-	-- draw lap count and game speed
-	if gametype == GT_RACE then
-		if gametyperules & GTR_CIRCUIT then
-			v.drawString(64, scroll+8, "LAPS", 0, "center")
-			v.drawString(64, scroll+16, numlaps, hilicol, "center")
-		end
-		v.drawString(256, scroll+8, "GAME SPEED", 0, "center")
-		v.drawString(256, scroll+16, --[[fourthgear.value and "4th Gear" or--]] speeds[gamespeed], hilicol, "center")
-	else
-		local timelimitintics = timelimit
-		if timelimitintics > 0 then
-			if leveltime <= timelimitintics + starttime then
-				v.drawString(64, scroll+8, "TIME LEFT", 0, "center")
-				v.drawString(64, scroll+16, min(timelimitintics, timelimitintics + starttime + 1 - leveltime) / TICRATE, hilicol, "center")
-			-- don't mind the usage of consoleplayer here, it's vanilla behavior
-			elseif (consoleplayer.valid and not consoleplayer.exiting) and leveltime > timelimitintics + starttime + TICRATE/2 and CV_FindVar("overtime").value then
-				v.drawString(64, scroll+8, "TIME LEFT", 0, "center")
-				v.drawString(64, scroll+16, "OVERTIME", hilicol, "center")
-			end
-		end
-		if pointlimit > 0 then
-			v.drawString(256, scroll+8, "POINT LIMIT", 0, "center")
-			v.drawString(256, scroll+16, pointlimit, hilicol, "center")
-		end
-	end
-
 	-- draw right pane
-	local fy = 28+scroll
+	local fy = 14+scroll
 	local fx = 163
 	local off = 0 -- right pane line offset OH GOD this code is everywhere
 
 	if hm_scoreboard_showtext.value then
-		if hm_motd_name.string ~= "" then
-			v.drawString(fx, fy, SG_Escape(hm_motd_name.string), 0, "thin")
-			v.drawString(fx, fy+10, "\134Contact: "..SG_Escape(hm_motd_contact.string), 0, "small")
-			off = $ + 20
+		if hm_scoreboard_logo.string ~= "" then
+			local logo = v.cachePatch(hm_scoreboard_logo.string)
+			v.draw(fx + 77 - logo.width/2, fy+off, logo)
+			off = $ + logo.height + 2
+		end
+
+		if hm_scoreboard_title.string ~= "" then
+			v.drawString(fx, fy+off, SG_Escape(hm_scoreboard_title.string), 0, "thin")
+			off = $ + 10
 		end
 
 		if #scoreboardmessages > 0 then
@@ -890,11 +895,9 @@ hud.add(function(v)
 				v.drawString(fx, fy+off, line, 0, "small")
 				off = $ + (line == " " and hm_scoreboard_linespacing.value or 5)
 			end
-			off = $ + 2
 		end
 
 		-- gameplay changes
-		local drew = false
 		local pcount = 0
 		if hm_scoreboard_showminimum.value == 2 then
 			for p in players.iterate do
@@ -904,13 +907,13 @@ hud.add(function(v)
 			end
 		end
 
-		local right = false
+		local drew, right = false, false
 		for _, mod in ipairs(balancechanges) do
 			local cvar = mod.var and CV_FindVar(mod.var)
 			if not cvar or (cvar and cvar.value) then
 				if not drew then
-					v.drawString(fx, fy+off, "\131Gameplay \128/ \134Balance Changes:", 0, "thin")
-					off = $ + 10
+					v.drawString(fx, fy+off+2, "\131Gameplay \128/ \134Balance Changes:", 0, "thin")
+					off = $ + 12
 				end
 				drew = true
 
@@ -927,29 +930,49 @@ hud.add(function(v)
 					end
 				end
 
-				v.drawString(fx+(right and 77 or 0), fy+off, display, 0, "small")
+				v.drawString(fx+(right and 77 or 0), fy+off-(right and 5 or 0), display, 0, "small")
 
 				local long = v.stringWidth(display, 0, "small") > 80 -- SG fast respawn is too long lol
 				if long or right then
-					off = $ + 5
 					right = false
 				else
+					off = $ + 5
 					right = true
 				end
 			end
 		end
-		if drew then off = ($ / 2) + ($ % 2) + 5 end
 	end
 
 	-- draw map title
-	v.drawString(4, 188, getMapTitle() --[[.." - "..mapheaderinfo[gamemap].subttl--]], V_SNAPTOBOTTOM|V_SNAPTOLEFT, "thin")
+	--[[
+	local showid = hm_scoreboard_showmapid.value
+	v.drawString(4, 188 - (showid and 3 or 0), G_BuildMapTitle(gamemap))
+	if showid then v.drawString(4, 194, G_BuildMapName(gamemap), V_GRAYMAP, "small") end
+	--]]
+	local title = G_BuildMapTitle(gamemap)
+	v.drawString(4, 188, title)
+	if hm_scoreboard_showmapid.value then
+		v.drawString(6 + v.stringWidth(title), 192, G_BuildMapName(gamemap), V_GRAYMAP, "small")
+	end
+
+	-- draw gametype info
+	local l, r = getGametypeStrings(gametype)
+	v.drawString(240, 4, r, 0, "center")
+	v.drawString(80, 4, l, 0, "center")
 
 	-- calculate max scroll
-	maxscroll = min(pscroll, -off + 162)
+	maxscroll = min(pscroll, -off + 172)
 end, "scores")
 
 -- good ol' SG elim-style player counts
-hud.add(function(v, p)
+hud.add(function(v, p, c)
+	if c.pnum ~= splitscreen + 1 then return end
+	fadetime = max($ - 1, 0)
+
+	if hm_scoreboard.value and hm_scoreboard_local.value then
+		v.fadeScreen(31, fadetime)
+	end
+
 	if hm_scoreboard_showminimum.value ~= 1 or p ~= displayplayers[splitscreen] or SG_HideHud then return end
 
 	local display = ""
@@ -1103,18 +1126,6 @@ hud.add(function(v)
 			v.drawScaled((dx+12+hscroll)*FRACUNIT, y*FRACUNIT, FRACUNIT/2, v.cachePatch("SPRAYCAN"), 0, v.getColormap(TC_DEFAULT, p.skincolor))
 		end
 	end)
-
-	-- add a notch to the top separator
-	v.drawFill(160+hscroll, scroll+14, 1, 12, 0)
-
-	-- draw level name
-	v.drawString(BASEVIDWIDTH/2+hscroll, scroll+4, (encoremode and "* \129ENCORE\128 " or "* ")..getMapTitle().." *", 0, "center")
-
-	local hilicol = getHighlightColor()
-	v.drawString(RANK_OFFS+hscroll, scroll+16, "#", hilicol, "right")
-	v.drawString(RANK_OFFS+10+hscroll, scroll+16, "Name", hilicol)
-	v.drawString(STATUS_OFFS+hscroll, scroll+16, "Time", hilicol, "right")
-	v.drawString(ITEMLOG_X+4+hscroll, scroll+16, "Rolls", hilicol)
 
 	--[[
 	if server.hmfinishtimer ~= nil then
