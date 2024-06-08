@@ -76,15 +76,6 @@ local hm_scoreboard_longnames = CONFIG_RegisterVar{
 	displayname = "Long names",
 	description = "Allow names to extend past the left edge of the screen."
 }
-local hm_scoreboard_pingdisplay = CONFIG_RegisterVar{
-	name = "hm_scoreboard_pingdisplay",
-	defaultvalue = "Bars",
-	possiblevalue = { Bars = 0, ["Delay tics"] = 1 },
-
-	config_menu = "Hostmod",
-	displayname = "Ping display",
-	description = "How to display each player's ping."
-}
 local hm_scoreboard_showminimum = CONFIG_RegisterVar{
 	name = "hm_scoreboard_showminimum",
 	defaultvalue = "HUD",
@@ -159,8 +150,9 @@ local hm_scoreboard_title = CV_RegisterVar({
 	flags = CV_NETVAR
 })
 
-local pingtable = { [0] = 1, 1, 2, 2, 3, 3, 3, 4, 4, 4 }
-local pingcolors = { SKINCOLOR_CYAN, SKINCOLOR_SWAMP, SKINCOLOR_YELLOW, SKINCOLOR_ROSE }
+local pingtable = { [0] = 1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 4 }
+local pingcolors = { SKINCOLOR_JAWZ, SKINCOLOR_MINT, SKINCOLOR_GOLD, SKINCOLOR_RASPBERRY, SKINCOLOR_MAGENTA }
+local pingpatches = { "PINGGFX1", "PINGGFX2", "PINGGFX3", "PINGGFX4", "PINGGFX5ALT" }
 local scroll, maxscroll = 0, 0
 local hscroll = 0
 local namescroll, namescrolltimer = 0, TICRATE
@@ -802,15 +794,11 @@ local function drawBaseHud(v, spectators, extrafunc)
 		end
 
 		-- ping
-		if (p ~= server and netgame and not p.bot) or p._finallatency then
-			local ping = max(p.ping, p._finallatency or 0)
-			if hm_scoreboard_pingdisplay.value and ping < 10 then
-				local cmap = v.getColormap(TC_RAINBOW, pingcolors[pingtable[ping]])
-				v.draw(3-pushx+hscroll, hy+1, v.cachePatch("PINGD"), specflag, cmap)
-				v.draw(7-pushx+hscroll, hy+1, v.cachePatch("PINGN"..ping), specflag, cmap)
-			else
-				v.draw(3-pushx+hscroll, hy, v.cachePatch("PINGGFX"..(pingtable[ping] or 5)), specflag)
-			end
+		if p ~= server and netgame and not p.bot then
+			local ping = p.ping
+			local patch = pingpatches[pingtable[ping] or 5]
+			v.draw(4-pushx+hscroll, hy, v.cachePatch(patch), specflag)
+			v.drawString(13-pushx+hscroll, hy+5, ping, specflag|V_GRAYMAP, "small-right")
 		end
 
 		-- extra function
