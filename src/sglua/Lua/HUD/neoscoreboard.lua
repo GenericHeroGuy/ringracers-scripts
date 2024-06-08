@@ -515,8 +515,14 @@ local function saveMessages(sync)
 	scoreboardmessages = sync($)
 	balancechanges = sync($)
 end
+local replay_netgame -- for replays
 addHook("NetVars", saveMessages)
-SG_AddHook("ReplayArchive", saveMessages)
+-- NetVars gets called everytime a rewind point is created in replays
+-- so have to do replay_netgame separately
+SG_AddHook("ReplayArchive", function(archive)
+	replay_netgame = archive(netgame)
+	saveMessages(archive)
+end)
 
 addHook("ThinkFrame", function()
 	if leveltime == 0 then return end
@@ -1043,16 +1049,18 @@ local INVFRAMES = { [0] = "K_ISINV1", "K_ISINV2", "K_ISINV3", "K_ISINV4", "K_ISI
 local RINGBOXES = { [0] = "K_SBBAR", "K_SBBAR2", "K_SBBAR3", "K_SBRING", "K_SBSEV", "K_SBJACK" }
 
 local inttime, sorttic
-addHook("MapChange", function() inttime = 0 end)
+addHook("ThinkFrame", function() inttime = 0 end)
 addHook("IntermissionThinker", function()
 	if inttime == 0 then
 		sorttic = max((CV_FindVar("inttime").value*TICRATE/2) - 2*TICRATE, 2*TICRATE)
 	end
-	inttime = $ + 1
+	if not replayplayback then
+		inttime = $ + 1
+	end
 end)
 
 hud.add(function(v)
-	if not (netgame and hm_scoreboard.value and hm_scoreboard_local.value) then
+	if not ((netgame or (replayplayback and replay_netgame)) and hm_scoreboard.value and hm_scoreboard_local.value) then
 		hud.enable("intermissionmessages") -- = intermissiontally
 		return
 	end

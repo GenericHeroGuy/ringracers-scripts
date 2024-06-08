@@ -233,4 +233,5 @@ addHook("PlayerSpawn", function()
 			return var
 		end)
 	end
+	loading = false
 end)
