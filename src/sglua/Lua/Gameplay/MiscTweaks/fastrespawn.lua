@@ -7,7 +7,7 @@ local cv_fastrespawn = CV_RegisterVar {
 }
 
 addHook("PlayerThink", function(p)
-    if p.respawn.state then
+    if cv_fastrespawn.value and p.respawn.state then
         if not p.fastrespawn then
             if p.position == 1 then
                 -- Not exposed to lua but this is vanilla respawn time. No bonuses for frontrunner
