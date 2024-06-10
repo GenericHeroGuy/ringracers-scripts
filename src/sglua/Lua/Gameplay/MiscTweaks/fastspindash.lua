@@ -63,7 +63,7 @@ local function shouldPlaySpindashSound(chargetime)
 end
 
 addHook("PlayerThink", function(p)
-    if p.spindash and p.rings > 0 then
+    if cv_fastspindash.value and p.spindash and p.rings > 0 then
         local MAXCHARGETIME = K_GetSpindashChargeTime(p)
 
         p.spindashbonus = ($ or 0) + spindashBonusChargeRate(p)
