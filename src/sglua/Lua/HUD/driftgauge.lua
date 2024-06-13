@@ -52,7 +52,7 @@ local cv_colorizedhud
 local cv_colorizedhudcolor
 
 local function useColorizedHud(v)
-	return v.useColorHud and v.useColorHud() ~= (cv_driftgaugecolorized.value == 1)
+	return v.useColorHud and v.useColorHud() ~= (cv_driftgaugecolorized.value == 1) or (not v.useColorHud and (cv_driftgaugecolorized.value == 1))
 end
 
 local function getBackgroundPatch(v)
@@ -60,7 +60,7 @@ local function getBackgroundPatch(v)
 end
 
 local function getBackgroundColormap(v, p)
-	return useColorizedHud(v) and v.getColormap(TC_RAINBOW, v.getHudColor()) or nil
+	return useColorizedHud(v) and v.getColormap(TC_RAINBOW, v.getHudColor and v.getHudColor() or p.skincolor) or nil
 end
 
 local function stringdraw(v, x, y, str, flags, colormap)
