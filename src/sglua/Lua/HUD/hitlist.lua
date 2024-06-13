@@ -83,6 +83,10 @@ addHook("MobjDamage", function(target, inflictor, source, damage, damagetype)
 		if player.curshield == KSHIELD_LIGHTNING
 		and damagetype == DMG_VOLTAGE|DMG_CANTHURTSELF|DMG_WOMBO then
 			icon = "HL_LIGHTNINGSHIELD"
+		-- trick stomp(?), an ancient relic from a time where trickpanel was k_pogospring
+		-- no gravflip check here
+		elseif player.trickpanel and inflictor.momz < 0 and P_IsObjectOnGround(target) then
+			icon = "HL_TRICKSTOMP"
 		-- K_PvPTouchDamage
 		elseif player.invincibilitytimer > 0 then
 			icon = "HL_INVINCIBILITY"
