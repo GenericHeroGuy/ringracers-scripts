@@ -78,6 +78,7 @@ addHook("MobjDamage", function(target, inflictor, source, damage, damagetype)
 
 	if inflictor.type == MT_PLAYER then
 		local player = inflictor.player
+		local thrangle = R_PointToAngle2(source.x, source.y, inflictor.x, inflictor.y)
 		-- chances of this are next to none,
 		-- but if someone with a lightning shield has invinc at the same time...
 		if player.curshield == KSHIELD_LIGHTNING
@@ -87,6 +88,12 @@ addHook("MobjDamage", function(target, inflictor, source, damage, damagetype)
 		-- no gravflip check here
 		elseif player.trickpanel and inflictor.momz < 0 and P_IsObjectOnGround(target) then
 			icon = "HL_TRICKSTOMP"
+		-- K_InstaWhipCollide
+		elseif target == inflictor and inflictor.momx == FixedMul(7*mapobjectscale, cos(thrangle)) and inflictor.momy == FixedMul(7*mapobjectscale, sin(thrangle)) then
+			icon = "HL_COUNTER"
+		-- K_DoGuardBreak
+		elseif target.player.defenselockout == 1 then
+			icon = "HL_GUARDBREAK"
 		-- K_PvPTouchDamage
 		elseif player.invincibilitytimer > 0 then
 			icon = "HL_INVINCIBILITY"
@@ -96,17 +103,6 @@ addHook("MobjDamage", function(target, inflictor, source, damage, damagetype)
 			icon = "HL_BUBBLESHIELD"
 		elseif player.sneakertimer > 0 and not P_PlayerInPain(player) and player.flashing == 0 then
 			icon = "HL_SNEAKER"
-		-- battle!
-		elseif damagetype == DMG_TUMBLE then
-			-- target and inflictor here are actually the attacker
-			if target == inflictor then
-				icon = "HL_COUNTER"
-			elseif target.player.defenselockout == 1 then
-				icon = "HL_GUARDBREAK"
-			else
-				print("I THOUGHT THIS WAS BATTLE MODE")
-				return
-			end
 		else
 			print("uhhh what kinda player attack is this")
 			return
