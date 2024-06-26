@@ -16,7 +16,7 @@ local function updateConfig(p)
         return
     end
 
-    file:write("fastfallbounce "..(p.fastfallbounce and "Yes" or "No").."\n")
+    file:write("fastfallbounce "..(p.nofastfallbounce and "No" or "Yes").."\n")
     file:close()
 end
 
@@ -49,13 +49,13 @@ end
 COM_AddCommand("fastfallbounce", function(p, arg)
     if not arg then
         CONS_Printf(p, "Usage: fastfallbounce yes/no")
-        CONS_Printf(p, "Fast fall bounce is "..(p.fastfallbounce and "\131enabled" or "\133disabled"))
+        CONS_Printf(p, "Fast fall bounce is "..(p.nofastfallbounce and "\133disabled" or "\131enabled"))
         return
     end
 
-    p.fastfallbounce = yesno(arg)
+    p.nofastfallbounce = not yesno(arg)
 
-    CONS_Printf(p, "Fast fall bounce is now "..(p.fastfallbounce and "\131enabled" or "\133disabled"))
+    CONS_Printf(p, "Fast fall bounce is now "..(p.nofastfallbounce and "\133disabled" or "\131enabled"))
 
     if cv_noffbounce.value == 0 then
         CONS_Printf(p, "\131NOTICE:\128 nofastfallbounce.lua is disabled by host")
@@ -67,7 +67,7 @@ COM_AddCommand("fastfallbounce", function(p, arg)
 end)
 
 addHook("PlayerThink", function(p)
-    if cv_noffbounce.value == 0 or p.fastfallbounce then return end
+    if cv_noffbounce.value == 0 or not p.nofastfallbounce then return end
 
     -- the actual bounce is delayed by a tic for some reason, so this works
     if p.mo and p.mo.eflags & MFE_JUSTHITFLOOR and p.cmd.buttons & (BT_ACCELERATE|BT_BRAKE) and p.curshield ~= KSHIELD_BUBBLE then
