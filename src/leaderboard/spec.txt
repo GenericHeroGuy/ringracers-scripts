@@ -1,0 +1,76 @@
+Binary leaderboard spec
+
+//short MAPID
+//int LENGTH  // length of all record data of this map, for seeking
+int CHECKSUM  // checksum of map header, for moving records
+int NUMRECORDS
+	byte VERSION
+
+	short FLAGS
+	// b0-1: kartspeed
+	// b2:   encore
+	// b3:   battle
+	// b4:   SPB Attack
+	// b5:   SPBA expert
+	// b6:   SPBA KARTBIG
+	// b7:   SPBA justice
+	// b8:   Acrobasics
+	// b9:   Combi
+
+	int FINISHTIME
+
+	byte NUMLAPS // laps minus 1, we already have finishtime
+		int LAPTIME
+
+	byte NUMPLAYERS
+		string NAME
+		string SKIN
+		byte COLOR
+		byte SPEED
+		byte WEIGHT
+		//short GHOSTLENGTH // capped at 65535 bytes. that's enough for 6-7 minutes of ghost data
+		//string GHOSTDATA
+		short GHOSTNUM
+
+
+
+Binary ghost data spec
+
+byte FLAGS
+// b0-3: "fake" mobj frame (basically divided by 2, see below)
+// b4: XY present
+// b5: Z present
+// b6: angle present
+// b7: ghost special
+
+// 8-bit signed momentum/angle delta (with varying precision)
+bloat/nil XDELTA
+bloat/nil YDELTA
+bloat/nil ZDELTA
+bloat/nil ADELTA
+
+bloating point?
+not really floating point, just encodes 4 bits of the number at a time
+1 sign bit
+3 exponent bits
+4 fraction bits
+exp 0: FRACBITS+12 (31-28)
+exp 1: FRACBITS+8  (27-24)
+exp 2: FRACBITS+4  (23-20)
+exp 3: FRACBITS+0  (19-16)
+exp 4: FRACBITS-4  (15-12)
+exp 5: FRACBITS-8  (11-8)
+exp 6: FRACBITS-12 (7-4)
+exp 7: FRACBITS-16 (3-0)
+
+fake mobj frames
+why store the full frame number when you can just store the specific animation?
+0: STAND   8: RUNR
+1: STANDL  9: DRIFTL
+2: STANDR  10: DRIFTR
+3: WALK    11: SPIN
+4: WALKL   12: SQUISH
+5: WALKR   13: POGO
+6: RUN     14: reserved
+7: RUNL    15: reserved
+NOTE: Simple AnimaL plays by different rules, see code
