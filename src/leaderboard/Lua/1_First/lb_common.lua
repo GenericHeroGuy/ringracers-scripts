@@ -1,14 +1,20 @@
-rawset(_G, "lb_score_t", function(map, name, skin, color, time, splits, flags, stat, checksum)
+rawset(_G, "lb_score_t", function(map, checksum, flags, time, splits, players)
 	return {
 		["map"]    = map,
+		["checksum"] = checksum,
+		["flags"]  = flags,
+		["time"]   = time,
+		["splits"] = splits,
+		["players"] = players,
+	}
+end)
+
+rawset(_G, "lb_player_t", function(name, skin, color, stat)
+	return {
 		["name"]   = name,
 		["skin"]   = skin,
 		["color"]  = color,
-		["time"]   = time,
-		["splits"] = splits,
-		["flags"]  = flags,
-		["stat"] = stat,
-		["checksum"] = checksum
+		["stat"]  = stat,
 	}
 end)
 
@@ -40,10 +46,7 @@ rawset(_G, "lb_ZoneAct", function(map)
 end)
 
 rawset(_G, "lb_stat_t", function(speed, weight)
-	if speed and weight then
-		return (speed << 4) | weight
-	end
-	return 0
+	return (speed << 4) | weight
 end)
 
 

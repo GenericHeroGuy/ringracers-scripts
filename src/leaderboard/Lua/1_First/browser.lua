@@ -198,6 +198,7 @@ local F_SPBATK = 0x1
 local F_SPBJUS = 0x2
 local F_SPBBIG = 0x4
 local F_SPBEXP = 0x8
+local F_COMBI = 0x10
 local F_ENCORE = 0x80
 
 local function drawGamemode(v)
@@ -265,6 +266,20 @@ local function drawGamemode(v)
 			modeX,
 			modeY,
 			"SPB Attack!"
+		)
+	elseif m & F_COMBI then
+		local combip = v.cachePatch("HEART4")
+		v.drawScaled(
+			modeX * FRACUNIT - 19*scale,
+			modeY * FRACUNIT - 23*scale,
+			scale,
+			combip
+		)
+
+		v.drawString(
+			modeX,
+			modeY,
+			"Combi Ring!"
 		)
 	end
 end
@@ -349,10 +364,11 @@ local colorFlags = {
 }
 
 local norank
-local function drawScore(v, i, pos, score, highlight)
+local function drawScore(v, i, pos, score, player)
 	local y = scoresY + i * 18
 	local textFlag = colorFlags[pos%2]
-	
+	local ofs = 0
+
 	if not norank then
 		norank = v.cachePatch("M_NORANK")
 	end
@@ -361,28 +377,32 @@ local function drawScore(v, i, pos, score, highlight)
 	v.drawNum(column[1], y, pos)
 
 	-- facerank
-	local skin = skins[score["skin"]]
-	local facerank = skin and v.cachePatch(useHighresPortrait() and skin.facewant or skin.facerank) or norank
-	local downscale = (facerank ~= norank and useHighresPortrait()) and 2 or 1
-	local color = tonumber(score["color"]) or 0
-	
-	if color >= MAXSKINCOLORS then
-		color = 0
-	end
-	
-	v.drawScaled(column[1]<<FRACBITS, y<<FRACBITS, FRACUNIT/downscale, facerank, 0, v.getColormap("sonic", color))
+	for i, p in ipairs(score.players) do
+		local skin = skins[p.skin]
+		local facerank = skin and v.cachePatch(useHighresPortrait() and skin.facewant or skin.facerank) or norank
+		local downscale = (facerank ~= norank and useHighresPortrait()) and 2 or 1
+		local color = p.color < MAXSKINCOLORS and p.color or 0
+		v.drawScaled((column[1] + ofs)<<FRACBITS, y<<FRACBITS, FRACUNIT/downscale, facerank, 0, v.getColormap(TC_DEFAULT, color))
 
-	-- chili
-	if highlight then
-		local chilip = v.cachePatch("K_CHILI"..leveltime/4%8+1)
-		v.draw(column[1], y, chilip)
-		textFlag = V_YELLOWMAP
+		-- chili
+		if player.name == p.name then
+			local chilip = v.cachePatch("K_CHILI"..leveltime/4%8+1)
+			v.draw(column[1], y, chilip)
+			textFlag = V_YELLOWMAP
+		end
+
+		-- draw a tiny little dot so you know which player's name is being shown
+		if #score.players > 1 and (leveltime / (TICRATE*5) % #score.players) + 1 == i then
+			v.drawFill(column[1] + ofs, y, 1, 1, 128)
+		end
+
+		-- stats
+		drawStats(v, column[1] + ofs, y, p.skin, p.stat)
+		ofs = ofs + 17
 	end
 
-	-- stats
-	drawStats(v, column[1], y, score["skin"], score["stat"])
 	-- name
-	v.drawString(column[2], y, score["name"], V_ALLOWLOWERCASE | textFlag)
+	v.drawString(column[2] + ofs, y, score.players[(leveltime / (TICRATE*5) % #score.players) + 1].name, V_ALLOWLOWERCASE | textFlag)
 	-- time
 	v.drawString(column[3], y, TicsToTime(score["time"]), textFlag)
 	-- flags
@@ -418,7 +438,7 @@ local function drawBrowser(v, player)
 	scrollPos = max(min(scrollPos, record_count - 3), 1)
 	local endi = min(scrollPos + 7, record_count)
 	for i = scrollPos, endi do
-		drawScore(v, i - scrollPos + 1, i, records[i], records[i].name == player.name)
+		drawScore(v, i - scrollPos + 1, i, records[i], player)
 	end
 end
 rawset(_G, "DrawBrowser", drawBrowser)

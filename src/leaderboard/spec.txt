@@ -1,36 +1,33 @@
 Binary leaderboard spec
 
-//short MAPID
-//int LENGTH  // length of all record data of this map, for seeking
-int CHECKSUM  // checksum of map header, for moving records
-int NUMRECORDS
-	byte VERSION
+string "LEADERBOARD"
+byte VERSION
 
-	short FLAGS
-	// b0-1: kartspeed
-	// b2:   encore
-	// b3:   battle
-	// b4:   SPB Attack
-	// b5:   SPBA expert
-	// b6:   SPBA KARTBIG
-	// b7:   SPBA justice
-	// b8:   Acrobasics
-	// b9:   Combi
+// for each map...
+num MAPID
+num NUMRECORDS
+	short CHECKSUM
 
-	int FINISHTIME
+	num FLAGS
+	// b0:   SPB Attack
+	// b1:   SPBA justice
+	// b2:   SPBA KARTBIG
+	// b3:   SPBA expert
+	// b4:   combi
+	// b7:   encore
 
-	byte NUMLAPS // laps minus 1, we already have finishtime
-		int LAPTIME
+	num TIME
+
+	byte NUMSPLITS
+		num SPLIT
 
 	byte NUMPLAYERS
 		string NAME
 		string SKIN
 		byte COLOR
-		byte SPEED
-		byte WEIGHT
-		//short GHOSTLENGTH // capped at 65535 bytes. that's enough for 6-7 minutes of ghost data
-		//string GHOSTDATA
-		short GHOSTNUM
+		byte STATS
+
+num is a variable-length number, bit 7 set indicates more data
 
 
 

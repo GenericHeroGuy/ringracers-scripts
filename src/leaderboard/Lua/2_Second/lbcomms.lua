@@ -10,35 +10,39 @@ for i = 0, 255 do
 	tohex[string.char(i)] = string.format("%02x_", i)
 end
 
+local tins = table.insert
 local function base128encode(str)
-	local out = ""
+	local out = {}
 	local rest, bits = 0, 0
 	for i = 1, #str do
 		rest = $ | (str:byte(i) << bits)
 		bits = $ + 8
 		while bits >= 7 do
-			out = out..string.char(rest & 0x7f | 0x80)
+			tins(out, string.char(rest & 0x7f | 0x80))
 			rest = $ >> 7
 			bits = $ - 7
 		end
 	end
-	return out..string.char(rest & 0x7f | 0x80)
+	tins(out, string.char(rest & 0x7f | 0x80))
+	return table.concat(out)
 end
+rawset(_G, "lb_base128_encode", base128encode)
 
 local function base128decode(str)
-	local out = ""
+	local out = {}
 	local rest, bits = 0, 0
 	for i = 1, #str do
 		rest = $ | ((str:byte(i) & 0x7f) << bits)
 		bits = $ + 7
 		while bits >= 8 do
-			out = out..string.char(rest & 0xff)
+			tins(out, string.char(rest & 0xff))
 			rest = $ >> 8
 			bits = $ - 8
 		end
 	end
-	return out
+	return table.concat(out)
 end
+rawset(_G, "lb_base128_decode", base128decode)
 
 -- returns the length of a string if it were encoded
 local function base128expand(num)

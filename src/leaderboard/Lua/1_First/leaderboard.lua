@@ -9,6 +9,7 @@ local stat_t = lb_stat_t
 local lbComp = lb_comp
 local mapChecksum = lb_map_checksum
 local score_t = lb_score_t
+local player_t = lb_player_t
 local mapnumFromExtended = lb_mapnum_from_extended
 local fireEvent = lb_fire_event
 
@@ -35,6 +36,7 @@ local PATCH = nil
 local help = true
 local EncoreInitial = nil
 local ScoreTable
+local BrowserPlayer
 
 
 -- Text flash on finish
@@ -59,6 +61,7 @@ local FILENAME = "leaderboard.txt"
 local nextMap = nil
 
 local Flags = 0
+local F_COMBI = 0x10
 local F_ENCORE = 0x80
 
 -- SPB flags with the least significance first
@@ -68,7 +71,7 @@ local F_SPBBIG = 0x4
 local F_SPBEXP = 0x8
 
 -- Score table separator
-local ST_SEP = F_SPBATK
+local ST_SEP = F_SPBATK | F_COMBI
 
 local clearcheats = false
 
@@ -117,6 +120,8 @@ local EVENT_FINISH = "Finish"
 -- cvars
 local cv_teamchange
 local cv_spbatk
+local cv_combiactive
+local cv_combiminimumplayers
 
 local cv_gui = CV_RegisterVar({
 	name = "lb_gui",
@@ -199,9 +204,9 @@ local cv_spb_separate = CV_RegisterVar({
 	PossibleValue = CV_YesNo,
 	func = function(v)
 		if v.value then
-			ST_SEP = F_SPBATK
+			ST_SEP = F_SPBATK | F_COMBI
 		else
-			ST_SEP = F_SPBATK | F_SPBBIG | F_SPBEXP
+			ST_SEP = F_SPBATK | F_COMBI | F_SPBBIG | F_SPBEXP
 		end
 	end
 })
@@ -232,6 +237,27 @@ function allowJoin(v)
 	end
 end
 
+local function canstart()
+	if cv_combiactive == nil then
+		cv_combiactive = CV_FindVar("combi_active") or false
+		cv_combiminimumplayers = CV_FindVar("combi_minimumplayers") or false
+	end
+
+	local combi = cv_combiactive and cv_combiactive.value and cv_combiminimumplayers.value <= 2
+
+	local n = 0
+	for p in players.iterate do
+		if p.valid and not p.spectator then
+			n = $ + 1
+			if n > (combi and 2 or 1) then
+				return false
+			end
+		end
+	end
+	if combi and n == 1 then return false end
+	return true
+end
+
 -- Returns true if there is a single player ingame
 local function singleplayer()
 	local n = 0
@@ -248,9 +274,9 @@ end
 
 local function initLeaderboard(player)
 	if disable and leveltime < START_TIME then
-		disable = not singleplayer()
+		disable = not canstart()
 	else
-		disable = disable or not singleplayer()
+		disable = disable or not canstart()
 	end
 	disable = $ or not cv_enable.value or not (maptol & (TOL_SP | TOL_RACE))
 
@@ -265,7 +291,7 @@ end
 addHook("PlayerSpawn", initLeaderboard)
 
 local function doyoudare(player)
-	if not singleplayer() or player.spectator then
+	if not canstart() or player.spectator then
 		CONS_Printf(player, "How dare you")
 		return false
 	end
@@ -312,6 +338,7 @@ local function initBrowser(player)
 
 	InitBrowser(ST_SEP)
 	drawState = DS_BROWSER
+	BrowserPlayer = player
 
 	player.afkTime = leveltime
 end
@@ -379,6 +406,9 @@ local function modeToString(mode)
 				modestr = $ + v
 			end
 		end
+	end
+	if mode & F_COMBI then
+		modestr = modestr == "Time Attack" and "Combi" or $.." + Combi"
 	end
 
 	return modestr
@@ -711,7 +741,7 @@ local function moveRecords(player, from_map, from_checksum, to_map, to_checksum)
 
 	to.checksum = $:lower()
 
-	local mapRecords = GetMapRecords(from.id, from.checksum, F_SPBATK | F_SPBBIG | F_SPBEXP)
+	local mapRecords = GetMapRecords(from.id, from.checksum, F_SPBATK | F_COMBI | F_SPBBIG | F_SPBEXP)
 	local recordCount = 0
 	for mode, records in pairs(mapRecords) do
 		recordCount = $ + #records
@@ -734,26 +764,22 @@ end
 COM_AddCommand("lb_move_records", moveRecords, COM_ADMIN)
 
 --DEBUGGING
---local function printTable(tb)
---	for mode, tbl in pairs(tb) do
---		for map, scoreTable in pairs(tbl) do
---			print(string.format("[%d][%d] #%d", mode, map, #scoreTable))
---
---			--if scoreTable != nil then
---			--	print(
---			--		v[i]["name"],
---			--		v[i]["skin"],
---			--		v[i]["color"],
---			--		v[i]["time"],
---			--		table.concat(v[i]["splits"]),
---			--		v[i]["flags"],
---			--		","
---			--	)
---			--
---			--end
---		end
---	end
---end
+local function printTable(tb)
+	for mode, tbl in pairs(tb) do
+		print(string.format("[%d]", mode))
+		for _, v in pairs(tbl) do
+			print(
+				v.players[1].name,
+				v.players[1].skin,
+				v.players[1].color,
+				v["time"],
+				table.concat(v["splits"]),
+				v["flags"],
+				","
+			)
+		end
+	end
+end
 
 addHook("MapLoad", function()
 		TimeFinished = 0
@@ -765,11 +791,24 @@ addHook("MapLoad", function()
 		FlashTics = 0
 
 		allowJoin(true)
-		--printTable(lb)
 
 		MapRecords = GetMapRecords(gamemap, mapChecksum(gamemap), ST_SEP)
+
+		--printTable(MapRecords)
 	end
 )
+
+-- now with an S!
+local function getGamers()
+	local gamers = {}
+	for p in players.iterate do
+		if p.valid and not p.spectator then
+			table.insert(gamers, p)
+		end
+	end
+	table.sort(gamers, function(a, b) return a.name < b.name end)
+	return gamers
+end
 
 -- Item patches have the amazing property of being displaced 12x 13y pixels
 local iXoffset = 13 * FRACUNIT
@@ -849,24 +888,46 @@ local function scaleHud(value)
 	return 9*value/10
 end
 
-local function drawScore(v, player, pos, x, y, gui, faceRank, score, drawPos, textVFlags)
+local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 	textVFlags = textVFlags or V_HUDTRANSHALF
-	local me = player.name == score["name"]
+	local me = true
+	local gamers = getGamers()
+	for i, p in ipairs(score.players) do
+		if gamers[i].name ~= p.name then
+			me = false
+			break
+		end
+	end
 
 	local hudscale = scaleHud(FRACUNIT)
-	local facedownscale = ((faceRank ~= PATCH["NORANK"] and useHighresPortrait()) and 2 or 1)
 	local frdim = scaleHud(FACERANK_DIM)
-	local color = tonumber(score["color"]) or 0
-	
-	if color >= MAXSKINCOLORS then
-		color = 0
+
+	-- from left to right
+
+	-- Position
+	if drawPos then
+		v.drawNum(x, y + 3, pos, textVFlags | VFLAGS)
 	end
 
 	--draw Patch/chili
-	v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale/facedownscale, faceRank, V_HUDTRANS | VFLAGS, v.getColormap("sonic", color))
-	if me then
-		v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale, PATCH["CHILI"][(leveltime / 4) % 8], V_HUDTRANS | VFLAGS)
+	for i, p in ipairs(score.players) do
+		local faceRank = PATCH[useHighresPortrait() and "FACEWANT" or "FACERANK"][p.skin] or PATCH["NORANK"]
+		local facedownscale = (faceRank ~= PATCH["NORANK"] and useHighresPortrait()) and 2 or 1
+		local color = p.color < MAXSKINCOLORS and p.color or 0
+		v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale/facedownscale, faceRank, V_HUDTRANS | VFLAGS, v.getColormap(TC_DEFAULT, color))
+
+		if player.name == p.name then
+			v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale, PATCH["CHILI"][(leveltime / 4) % 8], V_HUDTRANS | VFLAGS)
+		end
+
+		-- draw a tiny little dot so you know which player's name is being shown
+		if #score.players > 1 and (leveltime / (TICRATE*5) % #score.players) + 1 == i then
+			v.drawFill(x, y, 1, 1, 128)
+		end
+
+		x = x + 17
 	end
+	x = x - 17
 
 	-- Encore
 	if score["flags"] & F_ENCORE then
@@ -926,11 +987,6 @@ local function drawScore(v, player, pos, x, y, gui, faceRank, score, drawPos, te
 		end
 	end
 
-	-- Position
-	if drawPos then
-		v.drawNum(x, y + 3, pos, textVFlags | VFLAGS)
-	end
-
 	-- Stats
 	local stat = score["stat"]
 	local pskin = score["skin"] and skins[score["skin"]]
@@ -953,7 +1009,7 @@ local function drawScore(v, player, pos, x, y, gui, faceRank, score, drawPos, te
 	end
 
 	if gui == GUI_ON or (gui == GUI_SPLITS and showSplit) then
-		local name = score["name"]
+		local name = score.players[(leveltime / (TICRATE*5) % #score.players) + 1].name
 
 		-- Shorten long names
 		local stralign = "left"
@@ -1026,18 +1082,16 @@ local function drawDefault(v, player, scoreTable, gui)
 
 	-- Draw placeholder score
 	if scoreTable == nil then
-		drawScore(v, player, 1, x, y, gui, PATCH["NORANK"], {["name"] = UNCLAIMED, ["time"] = 0, ["flags"] = 0})
+		drawScore(v, player, 1, x, y, gui, {["players"] = { { name = UNCLAIMED, color = 0 } }, ["time"] = 0, ["flags"] = 0})
 	else
 		for pos, score in ipairs(scoreTable) do
 			if pos > 5 then break end
 
-			local faceRank = PATCH[useHighresPortrait() and "FACEWANT" or "FACERANK"][score.skin] or PATCH["NORANK"]
 			local y = yoffset + (frspc) * (pos - 1)
 			drawScore(
 				v, player, pos,
 				x, y,
-				gui, faceRank,
-				score
+				gui, score
 			)
 		end
 	end
@@ -1071,12 +1125,10 @@ local function drawScroll(v, player, scoreTable, gui)
 		local y = FixedInt(scrollY)
 
 		for pos, score in ipairs(scoreTable) do
-			local faceRank = PATCH[useHighresPortrait() and "FACEWANT" or "FACERANK"][score.skin] or PATCH["NORANK"]
 			drawScore(
 				v, player, pos,
 				x, y + ((pos - 1) * frspc),
-				gui, faceRank,
-				score,
+				gui, score,
 				true,
 				V_HUDTRANS
 			)
@@ -1100,6 +1152,10 @@ end
 
 local function drawBrowser(v, player)
 	DrawBrowser(v, player)
+
+	if not singleplayer() then
+		v.drawString(0, 191, (SG_Color2Chat and SG_Color2Chat[BrowserPlayer.skincolor] or "")..BrowserPlayer.name.."\x80 is in control", V_20TRANS|V_ALLOWLOWERCASE|V_6WIDTHSPACE, "thin")
+	end
 end
 
 local stateFunctions = {
@@ -1214,6 +1270,11 @@ local function checkFlags(p)
 		cv_spbatk = CV_FindVar("spbatk")
 	end
 
+	if cv_combiactive == nil then
+		cv_combiactive = CV_FindVar("combi_active") or false
+		cv_combiminimumplayers = CV_FindVar("combi_minimumplayers") or false
+	end
+
 	-- SPBAttack
 	if server.SPBArunning and cv_spbatk.value then
 		flags = $ | F_SPBATK
@@ -1229,7 +1290,21 @@ local function checkFlags(p)
 		end
 	end
 
+	-- Combi
+	if cv_combiactive and cv_combiactive.value and cv_combiminimumplayers.value >= 2 then
+		flags = $ | F_COMBI
+	end
+
 	return flags
+end
+
+local function isSameRecord(a, b, modeSep)
+	if (a.flags & modeSep) ~= (b.flags & modeSep)
+	or #a.players ~= #b.players then return false end
+	for i = 1, #a.players do
+		if a.players[i].name ~= b.players[i].name then return false end
+	end
+	return true
 end
 
 local function saveTime(player)
@@ -1245,35 +1320,40 @@ local function saveTime(player)
 
 	ScoreTable = $ or {}
 
-	local pskin = skins[player.mo.skin]
+	local players = {}
+	local gamers = getGamers()
+	for _, p in ipairs(gamers) do
+		local pskin = skins[p.mo.skin]
+		table.insert(players, player_t(
+			p.name,
+			p.mo.skin,
+			p.skincolor,
+			stat_t(p.HMRs or pskin.kartspeed, p.HMRw or pskin.kartweight)
+		))
+	end
+
 	local newscore = score_t(
 		gamemap,
-		player.name,
-		player.mo.skin,
-		player.skincolor,
+		mapChecksum(gamemap),
+		Flags,
 		TimeFinished,
 		splits,
-		Flags,
-		stat_t(player.HMRs or pskin.kartspeed, player.HMRw or pskin.kartweight),
-		mapChecksum(gamemap)
+		players
 	)
 
 	-- Check if you beat your previous best
-	for i = 1, #ScoreTable do
-		if ScoreTable[i].name == player.name then
-			if not lbComp(newscore, ScoreTable[i]) then
-				-- You suck lol
-				S_StartSound(nil, 201)
-				FlashTics = leveltime + TICRATE * 3
-				FlashRate = 3
-				FlashVFlags = RedFlash
-				scroll_to(player)
-				fireEvent(EVENT_FINISH, {score = newscore})
-				return
-			end
+	for i, score in ipairs(ScoreTable) do
+		if isSameRecord(newscore, score, 0) and not lbComp(newscore, score) then
+			-- You suck lol
+			S_StartSound(nil, 201)
+			FlashTics = leveltime + TICRATE * 3
+			FlashRate = 3
+			FlashVFlags = RedFlash
+			scroll_to(player)
+			fireEvent(EVENT_FINISH, {score = newscore})
+			return
 		end
 	end
-
 
 	-- Save the record
 	SaveRecord(newscore, gamemap, ST_SEP)
@@ -1291,9 +1371,10 @@ local function saveTime(player)
 	ScoreTable = MapRecords[ST_SEP & Flags]
 
 	for i, score in ipairs(ScoreTable) do
-		if score.name != player.name then continue end
-		fireEvent(EVENT_FINISH, {position = i, score = newscore})
-		break
+		if isSameRecord(newscore, score, 0) then
+			fireEvent(EVENT_FINISH, {position = i, score = newscore})
+			break
+		end
 	end
 
 	-- Scroll the gui to the player entry
@@ -1301,26 +1382,18 @@ local function saveTime(player)
 end
 
 -- DEBUGGING
---local function saveLeaderboard(player, ...)
---	TimeFinished = tonumber(... or player.realtime)
---	splits = {1000, 2000, 3000}
---	saveTime(player)
---end
---COM_AddCommand("save", saveLeaderboard)
+local function saveLeaderboard(player, ...)
+	TimeFinished = tonumber(... or player.realtime)
+	splits = {1000, 2000, 3000}
+	saveTime(player)
+end
+COM_AddCommand("save", saveLeaderboard)
 
 local function regLap(player)
 	if player.laps > prevLap and TimeFinished == 0 then
 		prevLap = player.laps
 		table.insert(splits, player.realtime)
 		showSplit = 5 * TICRATE
-	end
-end
-
-local function getGamer()
-	for p in players.iterate do
-		if p.valid and not p.spectator then
-			return p
-		end
 	end
 end
 
@@ -1353,6 +1426,7 @@ local function think()
 	local leveltime = leveltime
 
 	if disable then
+		hud.enable("minirankings")
 		if cv_antiafk.value and not G_BattleGametype() then
 			if not singleplayer() then
 				for p in players.iterate do
@@ -1395,15 +1469,28 @@ local function think()
 
 	showSplit = max(0, showSplit - 1)
 
-	local p = getGamer()
+	if not cv_teamchange then
+		cv_teamchange = CV_FindVar("allowteamchange")
+	end
+
+	local gamers = getGamers()
+
+	if #gamers < ((Flags & F_COMBI) and 2 or 1) then
+		if Flags & F_COMBI then disable = true end -- not taking any risks
+		if cv_teamchange.value == 0 then
+			allowJoin(true)
+		end
+		return
+	end
+
+	hud.disable("minirankings")
+
 	if leveltime < START_TIME then
 		-- Help message
 		if leveltime == START_TIME - TICRATE * 3 then
-			if singleplayer()  then
-				if help then
-					help = false
-					chatprint(HELP_MESSAGE, true)
-				end
+			if help then
+				help = false
+				chatprint(HELP_MESSAGE, true)
 			else
 				help = true
 			end
@@ -1411,11 +1498,9 @@ local function think()
 
 		-- Autospec
 		if leveltime == 1 then
-			if p then
-				for s in players.iterate do
-					if s.valid and s.spectator then
-						COM_BufInsertText(s, string.format("view \"%d\"", #p))
-					end
+			for s in players.iterate do
+				if s.valid and s.spectator then
+					COM_BufInsertText(s, string.format("view \"%d\"", #gamers[1]))
 				end
 			end
 		end
@@ -1423,14 +1508,14 @@ local function think()
 		if leveltime > START_TIME - (3 * TICRATE) / 2 then
 			if clearcheats then
 				clearcheats = false
-				if p then
+				for _, p in pairs(gamers) do
 					p.SPBAKARTBIG = false
 					p.SPBAjustice = false
 					p.SPBAshutup = false
 				end
 			end
 
-			Flags = checkFlags(p)
+			Flags = checkFlags(gamers[1])
 
 			-- make sure the spb actually spawned
 			if server.SPBArunning and leveltime == START_TIME - 1 then
@@ -1446,78 +1531,88 @@ local function think()
 
 	ScoreTable = MapRecords[ST_SEP & Flags]
 
-	if not cv_teamchange then
-		cv_teamchange = CV_FindVar("allowteamchange")
-	end
-
-	if p then
+	for _, p in ipairs(gamers) do
 		-- must be done before browser control
 		if p.laps >= mapheaderinfo[gamemap].numlaps and TimeFinished == 0 then
 			TimeFinished = p.realtime
 			saveTime(p)
 		end
 
-		-- Scroll controller
-		-- Spectators can't input buttons so let the gamer do it
-		if drawState == DS_SCROLL then
-			if p.cmd.buttons & BT_BACKWARD then
-				scrollAcc = scrollAcc - FRACUNIT / 3
-			elseif p.cmd.buttons & BT_FORWARD then
-				scrollAcc = scrollAcc + FRACUNIT / 3
-			else
-				scrollAcc = FixedMul(scrollAcc, (FRACUNIT * 90) / 100)
-				if scrollAcc < FRACUNIT and scrollAcc > -FRACUNIT then
-					scrollAcc = 0
-				end
-			end
-		elseif drawState == DS_BROWSER then
-			if BrowserController(p) then
-				drawState = DS_DEFAULT
-			end
-
-			-- prevent intermission while browsing
-			if p.exiting then
-				p.exiting = $ + 1
-			end
-
-			-- disable spba hud
-			if server.SPBArunning and server.SPBAdone then
-				server.SPBArunning = false
-				p.pflags = $ & !(PF_TIMEOVER)
-				p.exiting = 100
-			end
-
-			-- prevent softlocking the server
-			if p.afkTime + AFK_BROWSER < leveltime then
-				drawState = DS_DEFAULT
-				S_StartSound(nil, 100)
-			end
-		elseif p.lives == 0 then
-			drawState = DS_SCROLL
-		end
-
 		if p.cmd.buttons or p.cmd.driftturn then
 			p.afkTime = leveltime
 		end
 
-		if not replayplayback then
-			if leveltime > PREVENT_JOIN_TIME and p.afkTime + AFK_TIMEOUT > leveltime then
-				if cv_teamchange.value then
-					allowJoin(false)
-				end
-			elseif p.afkTime + AFK_TIMEOUT < leveltime then
-				if not cv_teamchange.value then
-					allowJoin(true)
-				end
+		regLap(p)
+	end
+
+	-- Scroll controller
+	-- Spectators can't input buttons so let the gamer do it
+	if drawState == DS_SCROLL then
+		-- TODO nice port priority
+		if gamers[1].cmd.buttons & BT_BACKWARD then
+			scrollAcc = scrollAcc - FRACUNIT / 3
+		elseif gamers[1].cmd.buttons & BT_FORWARD then
+			scrollAcc = scrollAcc + FRACUNIT / 3
+		else
+			scrollAcc = FixedMul(scrollAcc, (FRACUNIT * 90) / 100)
+			if scrollAcc < FRACUNIT and scrollAcc > -FRACUNIT then
+				scrollAcc = 0
+			end
+		end
+	elseif drawState == DS_BROWSER then
+		if BrowserController(BrowserPlayer) then
+			drawState = DS_DEFAULT
+		end
+
+		-- prevent intermission while browsing
+		for _, p in pairs(gamers) do
+			if p.exiting then
+				p.exiting = $ + 1
 			end
 		end
 
-		regLap(p)
-	elseif cv_teamchange.value == 0 then
-		allowJoin(true)
+		-- disable spba hud
+		if server.SPBArunning and server.SPBAdone then
+			server.SPBArunning = false
+			BrowserPlayer.pflags = $ & !(PF_TIMEOVER)
+			BrowserPlayer.exiting = 100
+		end
+
+		-- prevent softlocking the server
+		if BrowserPlayer.afkTime + AFK_BROWSER < leveltime then
+			drawState = DS_DEFAULT
+			S_StartSound(nil, 100)
+		end
+	elseif gamers[1].lives == 0 then
+		drawState = DS_SCROLL
+	end
+
+	if not replayplayback then
+		local afktime = 0
+		for _, p in ipairs(gamers) do
+			afktime = max($, p.afkTime)
+		end
+		if leveltime > PREVENT_JOIN_TIME and afktime + AFK_TIMEOUT > leveltime then
+			if cv_teamchange.value then
+				allowJoin(false)
+			end
+		elseif afktime + AFK_TIMEOUT < leveltime then
+			if not cv_teamchange.value then
+				allowJoin(true)
+			end
+		end
 	end
 end
 addHook("ThinkFrame", think)
+
+-- sneakers only, for combi
+-- do this in playerthink to get rid of items as soon as possible
+addHook("PlayerThink", function(p)
+	if not disable and p.kartstuff[k_itemamount] then
+		p.kartstuff[k_itemtype] = KITEM_SNEAKER
+		p.kartstuff[k_itemamount] = 1
+	end
+end)
 
 local function interThink()
 	if nextMap then changeMap() end
@@ -1535,21 +1630,15 @@ addHook("VoteThinker", interThink)
 
 local cv_highresportrait
 function useHighresPortrait()
+	if cv_higresportrait == nil then
+		cv_highresportrait = CV_FindVar("highresportrait") or false
+	end
 	if cv_highresportrait then
 		return cv_highresportrait.value ~= cv_lb_highresportrait.value
 	end
-	
+
 	return cv_lb_highresportrait.value
 end
-
-local function lookupCvars()
-	if not cv_highresportrait then
-		cv_highresportrait = CV_FindVar("highresportrait")
-	end
-end
-
-addHook("MapLoad", lookupCvars)
-addHook("NetVars", lookupCvars)
 
 -- Returns the values clamed between min, max
 function clamp(min_v, v, max_v)
@@ -1565,5 +1654,6 @@ local function netvars(net)
 	MapRecords = net($)
 	TimeFinished = net($)
 	clearcheats = net($)
+	BrowserPlayer = net($)
 end
 addHook("NetVars", netvars)
