@@ -1328,7 +1328,8 @@ local function saveTime(player)
 			p.name,
 			p.mo.skin,
 			p.skincolor,
-			stat_t(p.HMRs or pskin.kartspeed, p.HMRw or pskin.kartweight)
+			stat_t(p.HMRs or pskin.kartspeed, p.HMRw or pskin.kartweight),
+			"this is a ghost (not)"
 		))
 	end
 

@@ -1,4 +1,4 @@
-rawset(_G, "lb_score_t", function(map, checksum, flags, time, splits, players)
+rawset(_G, "lb_score_t", function(map, checksum, flags, time, splits, players, id)
 	return {
 		["map"]    = map,
 		["checksum"] = checksum,
@@ -6,15 +6,17 @@ rawset(_G, "lb_score_t", function(map, checksum, flags, time, splits, players)
 		["time"]   = time,
 		["splits"] = splits,
 		["players"] = players,
+		["id"]     = id,
 	}
 end)
 
-rawset(_G, "lb_player_t", function(name, skin, color, stat)
+rawset(_G, "lb_player_t", function(name, skin, color, stat, ghost)
 	return {
 		["name"]   = name,
 		["skin"]   = skin,
 		["color"]  = color,
 		["stat"]  = stat,
+		["ghost"] = ghost,
 	}
 end)
 
