@@ -1,6 +1,8 @@
 $basepath src/leaderboard/
 $output out/leaderboard.pk3
 
+Lua/2_Second/lbcomms.lua
+Lua/2_Second/bghost.lua
 Lua/1_First/lb_common.lua
 Lua/1_First/lb_store.lua
 Lua/1_First/browser.lua

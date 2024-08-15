@@ -23,6 +23,15 @@ local GetMapRecords = lb_get_map_records
 local SaveRecord = lb_save_record
 local MapList = lb_map_list
 local MoveRecords = lb_move_records
+local WriteMapStore = lb_write_map_store
+
+-- bghost.lua
+local GhostStartRecording = lb_ghost_start_recording
+local GhostStopRecording = lb_ghost_stop_recording
+local GhostStartPlaying = lb_ghost_start_playing
+
+-- lbcomms.lua
+local CommsRequestGhosts = lb_request_ghosts
 --------------------------------------------
 
 -- Holds the current maps records table including all modes
@@ -782,21 +791,47 @@ local function printTable(tb)
 end
 
 addHook("MapLoad", function()
-		TimeFinished = 0
-		splits = {}
-		prevLap = 0
-		drawState = DS_DEFAULT
-		scrollY = 50 * FRACUNIT
-		scrollAcc = 0
-		FlashTics = 0
+	TimeFinished = 0
+	splits = {}
+	prevLap = 0
+	drawState = DS_DEFAULT
+	scrollY = 50 * FRACUNIT
+	scrollAcc = 0
+	FlashTics = 0
 
-		allowJoin(true)
+	allowJoin(true)
 
-		MapRecords = GetMapRecords(gamemap, mapChecksum(gamemap), ST_SEP)
+	if disable then return end
 
-		--printTable(MapRecords)
+	for p in players.iterate do
+		if not p.spectator then GhostStartRecording(p) end
 	end
-)
+
+	MapRecords = GetMapRecords(gamemap, mapChecksum(gamemap), ST_SEP)
+
+	--printTable(MapRecords)
+
+	for mode, records in pairs(MapRecords) do
+		if mode & ST_SEP ~= Flags & ST_SEP then continue end
+		for _, score in ipairs(records) do
+			-- TODO if not (score.flags & F_HASGHOST) then continue end
+			if not (GhostStartPlaying(score) or isserver) then
+				local map = gamemap
+				CommsRequestGhosts(score.id, function(ok, data)
+					if not ok then
+						print("Ghost download failed "..score.id)
+						return
+					end
+					-- yay upvalues!
+					print("Got ghost for "..score.id)
+					-- TODO combi
+					score.players[1].ghost = data
+					WriteMapStore(map)
+				end)
+			end
+		end
+	end
+end)
 
 -- now with an S!
 local function getGamers()
@@ -1329,7 +1364,7 @@ local function saveTime(player)
 			p.mo.skin,
 			p.skincolor,
 			stat_t(p.HMRs or pskin.kartspeed, p.HMRw or pskin.kartweight),
-			"this is a ghost (not)"
+			GhostStopRecording(p)
 		))
 	end
 

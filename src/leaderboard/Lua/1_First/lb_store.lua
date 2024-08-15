@@ -94,11 +94,11 @@ local function READNUM(f)
 end
 local function READSTR(f)
 	local len = f:read(1):byte()
-	return f:read(len)
+	return f:read(len) or ""
 end
 local function READGHOST(f)
 	local ll, lh = f:read(2):byte(1, 2)
-	return f:read(ll | (lh << 8))
+	return f:read(ll | (lh << 8)) or ""
 end
 
 -- write functions go into a string buffer, not a file
@@ -219,6 +219,9 @@ local function writeMapStore(mapnum, checksums, withghosts)
 	end
 	return string.format("%s/%s.sav2", cv_directory.string, G_BuildMapName(mapnum)), table.concat(f)
 end
+rawset(_G, "lb_write_map_store", function(map)
+	write_segmented(writeMapStore(map, LiveStore[map], true))
+end)
 
 local function writeColdStore(store)
 	local f = { "COLDSTORE" }
@@ -519,6 +522,10 @@ addHook("PlayerJoin", function(p)
 		for i, record in pairs(netreceived) do
 			print("A new record "..i)
 			print("ID "..record.id)
+			-- TODO don't wipe ghosts for joiners! still waiting for compression
+			for _, p in ipairs(record.players) do
+				p.ghost = ""
+			end
 			newstore[record.map] = $ or {}
 			newstore[record.map][record.checksum] = $ or {}
 			table.insert(newstore[record.map][record.checksum], record)
@@ -886,7 +893,6 @@ COM_AddCommand("lb_wipe_records", function()
 		end
 		LiveStore[map][checksum] = nil
 	end
-	LiveStore[map] = nil
 	dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
 end, COM_LOCAL)
 

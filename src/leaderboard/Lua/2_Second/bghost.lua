@@ -160,8 +160,7 @@ local function GetSimpleAnimalSequences(defs, skin)
 end
 
 -- returns the fakeframe to write for this tic
-local function WriteFakeFrame(ghost)
-	local player = ghost.player
+local function WriteFakeFrame(ghost, player)
 	-- an attempt at simple animal interop
 	-- only tested with shadowskates and runningchars, your mileage may vary
 	local defs = SIMPLE_ANIMAL_DEFINITIONS and SIMPLE_ANIMAL_DEFINITIONS[player.mo.skin]
@@ -230,8 +229,8 @@ local GS_DRIFTBOOST = 0x85 -- get drift boost (implies GS_NOSPARKS)
 local GS_SNEAKER = 0x86 -- used sneaker
 local GS_STARTBOOST = 0x87 -- start boost
 
-local function WriteGhostTic(ghost, x, y, z, angle)
-	local flags = WriteFakeFrame(ghost)
+local function WriteGhostTic(ghost, player, x, y, z, angle)
+	local flags = WriteFakeFrame(ghost, player)
 	local str = ""
 	if x or y then
 		flags = $ | 0x10
@@ -247,15 +246,15 @@ local function WriteGhostTic(ghost, x, y, z, angle)
 	end
 
 	-- and now, the specials
-	local ks = ghost.player.kartstuff
+	local ks = player.kartstuff
 
 	if ks[k_sneakertimer] > ghost.lastsneaker then
 		ghost.data = $..string.char(ks[k_sneakertimer] == 69 and GS_STARTBOOST or GS_SNEAKER)
 	end
 	ghost.lastsneaker = ks[k_sneakertimer]
 
-	if ghost.player.playerstate == PST_LIVE then
-		local dsv = K_GetKartDriftSparkValue(ghost.player)
+	if player.playerstate == PST_LIVE then
+		local dsv = K_GetKartDriftSparkValue(player)
 		if ks[k_driftcharge] >= dsv*4 then
 			if ghost.lastspark ~= 3 then ghost.data = $..string.char(GS_RAINBOWSPARKS) end
 			ghost.lastspark = 3
@@ -267,8 +266,8 @@ local function WriteGhostTic(ghost, x, y, z, angle)
 			ghost.lastspark = 1
 		end
 	end
-	if ghost.lastspark and (not ks[k_driftcharge] or ghost.player.playerstate ~= PST_LIVE) then
-		if not (ks[k_spinouttimer] or ghost.player.mo.eflags & MFE_JUSTBOUNCEDWALL) and abs(ks[k_drift]) ~= 5 and ks[k_getsparks] and ghost.player.playerstate == PST_LIVE then
+	if ghost.lastspark and (not ks[k_driftcharge] or player.playerstate ~= PST_LIVE) then
+		if not (ks[k_spinouttimer] or player.mo.eflags & MFE_JUSTBOUNCEDWALL) and abs(ks[k_drift]) ~= 5 and ks[k_getsparks] and player.playerstate == PST_LIVE then
 			ghost.data = $..string.char(GS_DRIFTBOOST)
 		else
 			ghost.data = $..string.char(GS_NOSPARKS)
@@ -279,17 +278,11 @@ local function WriteGhostTic(ghost, x, y, z, angle)
 	ghost.data = $..string.char(flags)..str
 end
 
-local function WriteGhost(ghost)
-	local f = io.open("ghost_"..ghost.player.name..".sav2", "wb")
-	f:write(ghost.data)
-	f:close()
-end
-
 local recorders = {}
 
+-- start recording ghost data for player
 local function StartRecording(player)
-	recorders[{
-		player = player,
+	recorders[player] = {
 		data = "",
 		lastsneaker = 0,
 		lastspark = 0,
@@ -307,26 +300,27 @@ local function StartRecording(player)
 		fakey = 0,
 		fakez = 0,
 		fakea = 0,
-	}] = true
+	}
 end
+rawset(_G, "lb_ghost_start_recording", StartRecording)
 
-local function StopRecording(ghost)
-	recorders[ghost] = nil
+-- stops recording a ghost
+-- returns the recorded data
+local function StopRecording(player)
+	local data = recorders[player].data
+	recorders[player] = nil
+	return data
 end
+rawset(_G, "lb_ghost_stop_recording", StopRecording)
 
-addHook("MapLoad", function()
-	for g in pairs(recorders) do
-		StopRecording(g)
-	end
-	for p in players.iterate do
-		StartRecording(p)
-	end
+addHook("MapChange", function()
+	recorders = {}
 end)
 
 addHook("ThinkFrame", function()
 	if not leveltime then return end
-	for g in pairs(recorders) do
-		if g.player.spectator then StopRecording(g); continue end
+	for player, g in pairs(recorders) do
+		if player.spectator then StopRecording(player); continue end
 
 		-- hoooly fuck this is stupid
 		-- but after hours and hours of trying random shit until something worked, this is what worked
@@ -334,7 +328,7 @@ addHook("ThinkFrame", function()
 		-- i have no clue what to do about the whiplash from teleports
 
 		local mold = g.momlog
-		local mnew = { x = g.player.mo.x - g.fakex, y = g.player.mo.y - g.fakey, z = g.player.mo.z - g.fakez, a = g.player.mo.angle - g.fakea }
+		local mnew = { x = player.mo.x - g.fakex, y = player.mo.y - g.fakey, z = player.mo.z - g.fakez, a = player.mo.angle - g.fakea }
 		g.momlog = mnew
 
 		local dx, dy, dz, da = mnew.x - mold.x, mnew.y - mold.y, mnew.z - mold.z, mnew.a - mold.a
@@ -343,7 +337,7 @@ addHook("ThinkFrame", function()
 		local bz, ez = FixedToBloat(dz + g.errorz)
 		local ba, ea = FixedToBloat(da + g.errora)
 		g.errorx, g.errory, g.errorz, g.errora = ex, ey, ez, ea
-		WriteGhostTic(g, bx, by, bz, ba)
+		WriteGhostTic(g, player, bx, by, bz, ba)
 		g.fakemomx = $ + BloatToFixed(bx)
 		g.fakemomy = $ + BloatToFixed(by)
 		g.fakemomz = $ + BloatToFixed(bz)
@@ -352,12 +346,6 @@ addHook("ThinkFrame", function()
 		g.fakey = $ + g.fakemomy
 		g.fakez = $ + g.fakemomz
 		g.fakea = $ + g.fakemoma
-
-		if g.player.cmd.buttons & BT_CUSTOM1 then
-			WriteGhost(g)
-			print("Ghost saved!")
-			StopRecording(g)
-		end
 	end
 end)
 
@@ -367,18 +355,35 @@ end)
 local replayers = {}
 local ghostwatching, ghostcam
 
-local function StartPlaying(player)
-	local mo = P_SpawnMobj(0, 0, 0, MT_THOK)
-	mo.flags = MF_NOTHINK|MF_NOBLOCKMAP|MF_NOGRAVITY|MF_NOCLIP|MF_NOCLIPTHING|MF_NOCLIPHEIGHT
-	mo.sprite = SPR_PLAY
-	mo.skin = player.mo.skin
-	mo.color = player.mo.color
+-- a file that is actually reading from a string
+local function FakeReader(str)
+	return {
+		str, 1,
+		read = function(self, num)
+			if not num then return #self[1] > self[2] and "" or nil end
+			local s = self[1]:sub(self[2], self[2]+num-1)
+			self[2] = $ + num
+			return s
+		end,
+		close = do end
+	}
+end
 
-	local file = io.open("ghost_"..player.name..".sav2", "rb")
-	if not file then return end
+local function PlayGhost(recplayer)
+	-- don't sync ghosts over netgames!
+	local oldflags = mobjinfo[MT_THOK].flags
+	mobjinfo[MT_THOK].flags = $ | MF_NOTHINK
+	local mo = P_SpawnMobj(0, 0, 0, MT_THOK)
+	mobjinfo[MT_THOK].flags = oldflags
+
+	mo.flags = MF_NOTHINK|MF_NOBLOCKMAP|MF_NOGRAVITY|MF_NOCLIP|MF_NOCLIPTHING|MF_NOCLIPHEIGHT|MF_DONTENCOREMAP
+	mo.sprite = SPR_PLAY
+	mo.skin = recplayer.skin
+	mo.color = recplayer.color
 
 	replayers[setmetatable({
-		file = file,
+		file = FakeReader(recplayer.ghost),
+		name = recplayer.name,
 		mo = mo,
 		gmomx = 0,
 		gmomy = 0,
@@ -398,6 +403,20 @@ local function StartPlaying(player)
 		driftboost = 0,
 	}, { __index = do error("no", 2) end, __newindex = do error("no", 2) end })] = true
 end
+
+-- plays the ghost(s) stored in the provided record
+local function StartPlaying(record)
+	for _, p in ipairs(record.players) do
+		if not #p.ghost then
+			return false
+		end
+	end
+	for _, p in ipairs(record.players) do
+		PlayGhost(p)
+	end
+	return true
+end
+rawset(_G, "lb_ghost_start_playing", StartPlaying)
 
 local function StopWatching()
 	ghostwatching = nil
@@ -425,12 +444,6 @@ end
 addHook("MapChange", function()
 	replayers = {}
 	ghostwatching = nil
-end)
-
-addHook("MapLoad", function()
-	for p in players.iterate do
-		StartPlaying(p)
-	end
 end)
 
 local starttime = 6*TICRATE + (3*TICRATE/4)
@@ -467,11 +480,23 @@ local function SpawnDriftSparks(r, direction)
 	end
 end
 
+-- yoinked from m_random.c
+local randomseed = 0xBADE4404
+local function randomrange(a, b)
+	local rng = randomseed
+	rng = $ ^^ ($ >> 13)
+	rng = $ ^^ ($ >> 11)
+	rng = $ ^^ ($ << 21)
+	randomseed = rng
+	rng = (($*36548569) >> 4) & (FRACUNIT-1)
+	-- and now the actual range part
+	return ((rng * (b-a+1)) >> FRACBITS) + a
+end
+
 local function SpawnFastLines(r)
-	-- TODO DESYNCS!!!!!!!!!!
-	local fast = P_SpawnMobj(r.mo.x + (P_RandomRange(-36,36) * r.mo.scale),
-		r.mo.y + (P_RandomRange(-36,36) * r.mo.scale),
-		r.mo.z + (r.mo.height/2) + (P_RandomRange(-20,20) * r.mo.scale),
+	local fast = P_SpawnMobj(r.mo.x + (randomrange(-36,36) * r.mo.scale),
+		r.mo.y + (randomrange(-36,36) * r.mo.scale),
+		r.mo.z + (r.mo.height/2) + (randomrange(-20,20) * r.mo.scale),
 		MT_FASTLINE)
 	fast.angle = R_PointToAngle2(0, 0, r.gmomx, r.gmomy)
 	fast.momx = 3*r.gmomx/4
@@ -516,8 +541,8 @@ addHook("ThinkFrame", function()
 				if flags == GS_SNEAKER or flags == GS_STARTBOOST then
 					r.sneakertimer = flags == GS_SNEAKER and TICRATE + (TICRATE/3) or 70
 					if not (r.boostflame and r.boostflame.valid) then
-						r.boostflame = P_SpawnMobj(r.mo.x, r.mo.y, r.mo.z, MT_BOOSTFLAME)
-						r.boostflame.target = r.mo
+						r.boostflame = P_SpawnMobj(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
+						r.boostflame.state = S_BOOSTFLAME
 						r.boostflame.scale = r.mo.scale
 						r.boostflame.frame = $ | FF_TRANS40
 					else
@@ -560,6 +585,22 @@ addHook("ThinkFrame", function()
 
 			if r.boostflame and r.boostflame.valid then
 				P_MoveOrigin(r.boostflame, r.mo.x + P_ReturnThrustX(r.realangle+ANGLE_180, r.mo.radius), r.mo.y + P_ReturnThrustY(r.realangle+ANGLE_180, r.mo.radius), r.mo.z)
+				r.boostflame.angle = r.realangle
+				r.boostflame.scale = r.mo.scale
+
+				if r.boostflame.state == S_BOOSTSMOKESPAWNER then
+					local smoke = P_SpawnMobj(r.boostflame.x, r.boostflame.y, r.boostflame.z+(8<<FRACBITS), MT_BOOSTSMOKE)
+
+					smoke.scale = r.mo.scale/2
+					smoke.destscale = 3*r.mo.scale/2
+					smoke.scalespeed = r.mo.scale/12
+
+					smoke.momx = r.gmomx/2
+					smoke.momy = r.gmomy/2
+					smoke.momz = r.gmomz/2
+
+					P_Thrust(smoke, r.boostflame.angle+FixedAngle(randomrange(135, 225)<<FRACBITS), randomrange(0, 8) * r.mo.scale)
+				end
 			end
 			if r.driftspark and r.mo.z < r.mo.floorz + mapobjectscale*8 then
 				SpawnDriftSparks(r, fspecial == "driftl" and 1 or -1)
@@ -661,7 +702,7 @@ hud.add(function(v, p)
 	if ghostwatching then
 		local flags = V_ALLOWLOWERCASE|V_HUDTRANS
 		v.drawString(160, 16, "Watching:", flags, "center")
-		v.drawString(160, 24, skins[ghostwatching.mo.skin].realname, flags|V_YELLOWMAP, "center")
+		v.drawString(160, 24, ghostwatching.name, flags|V_YELLOWMAP, "center")
 		local speed = FakeSpeedometer(FixedHypot(ghostwatching.gmomx, ghostwatching.gmomy), ghostwatching.mo.scale)
 		local color
 		if ghostwatching.driftboost > 50 then
@@ -680,7 +721,7 @@ hud.add(function(v, p)
 	end
 
 	if true then return end
-	local g = next(recorders)
+	local _, g = next(recorders)
 	if g then
 		v.drawString(240, 32, "FX: "..(g.fakex/FRACUNIT))
 		v.drawString(240, 40, "FY: "..(g.fakey/FRACUNIT))
