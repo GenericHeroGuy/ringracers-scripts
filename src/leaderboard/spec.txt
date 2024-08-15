@@ -1,12 +1,12 @@
 Binary leaderboard spec
 
-string "LEADERBOARD"
+// map stores (one per map)
+magic "LEADERBOARD"
 byte VERSION
+short CHECKSUM // of map title
 
-// for each map...
-num MAPID
 num NUMRECORDS
-	short CHECKSUM
+	num ID
 
 	num FLAGS
 	// b0:   SPB Attack
@@ -25,9 +25,23 @@ num NUMRECORDS
 		string NAME
 		string SKIN
 		byte COLOR
-		byte STATS
+		byte STATS // b7-4: speed, b0-3: weight
+		lstring GHOST
 
 num is a variable-length number, bit 7 set indicates more data
+strings are pascal-style, string = 1 byte length, lstring = 2 bytes length
+
+
+// coldstore script
+magic "COLDSTORE"
+// no version field, keep your coldstore updated!
+string DIRNAME // lb_store_directory
+
+// for each map (repeated until EOF)
+	num MAPNUM
+	short CHECKSUM
+	num NUMRECORDS
+		// see record format above
 
 
 

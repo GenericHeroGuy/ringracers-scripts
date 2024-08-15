@@ -147,7 +147,7 @@ local packets = {
 					print("not the server")
 					return
 				end
-				local maprecords = lb_get_map_records(gamemap, lb_map_checksum(gamemap), ~0)
+				local maprecords = lb_get_map_records(gamemap, -1)
 				local ghostdata
 				for mode, records in pairs(maprecords) do
 					for _, record in ipairs(records) do

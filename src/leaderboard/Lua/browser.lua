@@ -12,7 +12,6 @@ local ModeSep
 -- lb_common.lua
 local ZoneAct = lb_ZoneAct
 local TicsToTime = lb_TicsToTime
-local mapChecksum = lb_map_checksum
 
 -- lb_store.lua
 local GetMapRecords = lb_get_map_records
@@ -74,7 +73,7 @@ local function updateMapIndex(n)
 	mapIndex = mapIndexOffset(n)
 	scrollPos = 1
 
-	MapRecords = GetMapRecords(maps[mapIndex], mapChecksum(maps[mapIndex]), ModeSep)
+	MapRecords = GetMapRecords(maps[mapIndex], ModeSep)
 
 	updateModes()
 end
@@ -455,7 +454,7 @@ local function initBrowser(modeSep)
 	end
 
 	-- initialize MapRecords
-	MapRecords = GetMapRecords(gamemap, mapChecksum(gamemap), ModeSep)
+	MapRecords = GetMapRecords(gamemap, ModeSep)
 
 	scrollPos = 1
 	updateModes()

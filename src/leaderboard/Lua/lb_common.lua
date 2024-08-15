@@ -1,7 +1,6 @@
-rawset(_G, "lb_score_t", function(map, checksum, flags, time, splits, players, id)
+rawset(_G, "lb_score_t", function(map, flags, time, splits, players, id)
 	return {
 		["map"]    = map,
-		["checksum"] = checksum,
 		["flags"]  = flags,
 		["time"]   = time,
 		["splits"] = splits,

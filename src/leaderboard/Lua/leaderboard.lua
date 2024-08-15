@@ -435,7 +435,7 @@ local function records(player, ...)
 			return
 		end
 
-		mapRecords = GetMapRecords(mapnum, mapChecksum(mapnum), ST_SEP)
+		mapRecords = GetMapRecords(mapnum, ST_SEP)
 	end
 
 	local map = mapheaderinfo[mapnum]
@@ -601,7 +601,7 @@ local function findRival(player, ...)
 	local rivalScore
 	local yourScore
 	for i = 1, #maplist do
-		mapRecords = GetMapRecords(maplist[i].id, maplist[i].checksum, ST_SEP)
+		mapRecords = GetMapRecords(maplist[i], ST_SEP)
 
 		for mode, records in pairs(mapRecords) do
 			scores[mode] = $ or {}
@@ -668,9 +668,8 @@ local function findRival(player, ...)
 				CONS_Printf(
 					player,
 					string.format(
-						"%s %4s	%8s	%s%9s	\x80%s",
+						"%s	%8s	%s%9s	\x80%s",
 						G_BuildMapName(score.rival.map),
-						score.rival.checksum,
 						ticsToTime(score.rival.time),
 						color,
 						sym[diff<0] + ticsToTime(abs(diff)),
@@ -681,9 +680,8 @@ local function findRival(player, ...)
 				CONS_Printf(
 					player,
 					string.format(
-						"%s %4s	%8s	%9s	%s",
+						"%s	%8s	%9s	%s",
 						G_BuildMapName(score.rival.map),
-						score.rival.checksum,
 						ticsToTime(score.rival.time),
 						ticsToTime(0, true),
 						modestr
@@ -750,7 +748,7 @@ local function moveRecords(player, from_map, from_checksum, to_map, to_checksum)
 
 	to.checksum = $:lower()
 
-	local mapRecords = GetMapRecords(from.id, from.checksum, F_SPBATK | F_COMBI | F_SPBBIG | F_SPBEXP)
+	local mapRecords = GetMapRecords(from.id, F_SPBATK | F_COMBI | F_SPBBIG | F_SPBEXP)
 	local recordCount = 0
 	for mode, records in pairs(mapRecords) do
 		recordCount = $ + #records
@@ -807,7 +805,7 @@ addHook("MapLoad", function()
 		if not p.spectator then GhostStartRecording(p) end
 	end
 
-	MapRecords = GetMapRecords(gamemap, mapChecksum(gamemap), ST_SEP)
+	MapRecords = GetMapRecords(gamemap, ST_SEP)
 
 	--printTable(MapRecords)
 
@@ -1370,7 +1368,6 @@ local function saveTime(player)
 
 	local newscore = score_t(
 		gamemap,
-		mapChecksum(gamemap),
 		Flags,
 		TimeFinished,
 		splits,
@@ -1401,7 +1398,7 @@ local function saveTime(player)
 	FlashVFlags = YellowFlash
 
 	-- Reload the MapRecords
-	MapRecords = GetMapRecords(gamemap, mapChecksum(gamemap), ST_SEP)
+	MapRecords = GetMapRecords(gamemap, ST_SEP)
 
 	-- Set the updated ScoreTable
 	ScoreTable = MapRecords[ST_SEP & Flags]
