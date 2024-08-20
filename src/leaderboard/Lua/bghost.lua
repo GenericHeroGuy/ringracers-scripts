@@ -369,39 +369,76 @@ local function FakeReader(str)
 	}
 end
 
-local function PlayGhost(recplayer)
-	-- don't sync ghosts over netgames!
-	local oldflags = mobjinfo[MT_THOK].flags
-	mobjinfo[MT_THOK].flags = $ | MF_NOTHINK
-	local mo = P_SpawnMobj(0, 0, 0, MT_THOK)
-	mobjinfo[MT_THOK].flags = oldflags
+-- spawns an mobj that doesn't sync in netgames
+local function SpawnLocal(x, y, z, type)
+	local oldflags = mobjinfo[type].flags
+	mobjinfo[type].flags = $ | MF_NOTHINK
+	local mo = P_SpawnMobj(x, y, z, type)
+	mobjinfo[type].flags = oldflags
+	return mo
+end
 
-	mo.flags = MF_NOTHINK|MF_NOBLOCKMAP|MF_NOGRAVITY|MF_NOCLIP|MF_NOCLIPTHING|MF_NOCLIPHEIGHT|MF_DONTENCOREMAP
-	mo.sprite = SPR_PLAY
-	mo.skin = recplayer.skin
-	mo.color = recplayer.color
+local F_COMBI = 0x10
 
-	replayers[setmetatable({
-		file = FakeReader(recplayer.ghost),
-		name = recplayer.name,
-		mo = mo,
-		gmomx = 0,
-		gmomy = 0,
-		gmomz = 0,
-		gmoma = 0,
-		realangle = 0,
+-- spawns a ghost's half of the combi link
+local function SpawnCombiLink(r)
+	local count = 6/2 --hcombi.cv_ringamount.value/2 -- it's broken anyway
+	for i = 1, count do
+		local edge = i == 1 --or i == count
+		local link = SpawnLocal(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
+		link.flags = MF_NOTHINK|MF_NOBLOCKMAP|MF_NOGRAVITY|MF_NOCLIP|MF_NOCLIPTHING|MF_NOCLIPHEIGHT|MF_DONTENCOREMAP
+		link.state = edge and S_COMBILINK1 or S_COMBILINK2
+		link.scale = mapobjectscale / (edge and 2 or 1)
+		link.frame = FF_TRANS60
+		r.combilink[i] = link
+	end
+end
 
-		fspecial = 0,
-		lastfspecial = 0,
-		fakeframe = 0,
-		angofs = 0,
+local function PlayGhost(record)
+	local ghosts = {}
+	for i, recplayer in ipairs(record.players) do
+		local mo = SpawnLocal(0, 0, 0, MT_THOK)
+		mo.flags = MF_NOTHINK|MF_NOBLOCKMAP|MF_NOGRAVITY|MF_NOCLIP|MF_NOCLIPTHING|MF_NOCLIPHEIGHT|MF_DONTENCOREMAP
+		mo.sprite = SPR_PLAY
+		mo.skin = recplayer.skin
+		mo.color = recplayer.color
 
-		-- purely visual, just for showing vfx
-		boostflame = false,
-		sneakertimer = 0,
-		driftspark = 0,
-		driftboost = 0,
-	}, { __index = do error("no", 2) end, __newindex = do error("no", 2) end })] = true
+		local ghost = setmetatable({
+			file = FakeReader(recplayer.ghost),
+			name = recplayer.name,
+			mo = mo,
+			gmomx = 0,
+			gmomy = 0,
+			gmomz = 0,
+			gmoma = 0,
+			realangle = 0,
+
+			fspecial = 0,
+			lastfspecial = 0,
+			fakeframe = 0,
+			angofs = 0,
+
+			-- combi
+			combilink = {},
+			combipartner = false,
+
+			-- purely visual, just for showing vfx
+			boostflame = false,
+			sneakertimer = 0,
+			driftspark = 0,
+			driftboost = 0,
+		}, { __index = do error("no", 2) end, __newindex = do error("no", 2) end })
+		table.insert(ghosts, ghost)
+		replayers[ghost] = true
+	end
+
+	if record.flags & F_COMBI then
+		for i, g in ipairs(ghosts) do
+			local partner = ghosts[(i % #ghosts)+1]
+			g.combipartner = partner.mo
+			SpawnCombiLink(g)
+		end
+	end
 end
 
 -- plays the ghost(s) stored in the provided record
@@ -411,9 +448,7 @@ local function StartPlaying(record)
 			return false
 		end
 	end
-	for _, p in ipairs(record.players) do
-		PlayGhost(p)
-	end
+	PlayGhost(record)
 	return true
 end
 rawset(_G, "lb_ghost_start_playing", StartPlaying)
@@ -436,6 +471,9 @@ end
 
 local function StopPlaying(replay)
 	P_RemoveMobj(replay.mo)
+	for _, v in pairs(replay.combilink) do
+		P_RemoveMobj(v)
+	end
 	replay.file:close()
 	replayers[replay] = nil
 	if ghostwatching == replay then NextWatch() end
@@ -503,6 +541,23 @@ local function SpawnFastLines(r)
 	fast.momy = 3*r.gmomy/4
 	fast.momz = 3*r.gmomz/4
 	K_MatchGenericExtraFlags(fast, r.mo)
+end
+
+local function MoveCombiLink(r)
+	local c = r.combipartner
+	local length = #r.combilink*2 + 1
+	local divx = (c.x - r.mo.x)/length
+	local divy = (c.y - r.mo.y)/length
+	local divz = (c.z - r.mo.z)/length
+
+	for i, link in ipairs(r.combilink) do
+		P_MoveOrigin(link, r.mo.x + divx*i, r.mo.y + divy*i, r.mo.z + divz*i + 18*mapobjectscale)
+		link.color = c.color
+		-- have to animate it ourselves because NOTHINK
+		if link.state == S_COMBILINK2 then
+			link.frame = ($ & ~FF_FRAMEMASK) | leveltime/2 % 9
+		end
+	end
 end
 
 addHook("ThinkFrame", function()
@@ -617,6 +672,13 @@ addHook("ThinkFrame", function()
 				consoleplayer.awayviewtics = 0
 				consoleplayer.awayviewmobj = nil
 			end
+		end
+	end
+
+	-- update combi links after all ghosts have moved
+	for r in pairs(replayers) do
+		if r.combipartner and r.combipartner.valid then
+			MoveCombiLink(r)
 		end
 	end
 

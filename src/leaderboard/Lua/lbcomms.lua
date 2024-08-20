@@ -148,19 +148,18 @@ local packets = {
 					return
 				end
 				local maprecords = lb_get_map_records(gamemap, -1)
-				local ghostdata
+				local ghostdata = ""
 				for mode, records in pairs(maprecords) do
 					for _, record in ipairs(records) do
 						if record.id == recordid then
 							-- gotcha!
-							for _, p in ipairs(record.players) do
-								ghostdata = p.ghost
-								break
+							for i, p in ipairs(record.players) do
+								ghostdata = $..string.char(i, #p.ghost & 0xff, #p.ghost >> 8)..p.ghost
 							end
 						end
 					end
 				end
-				if not ghostdata then print("no data"); return end
+				if not #ghostdata then print("no data"); return end
 				local tx = {
 					data = ghostdata,
 					state = "sending",

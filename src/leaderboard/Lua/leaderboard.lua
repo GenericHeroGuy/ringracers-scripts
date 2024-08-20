@@ -822,8 +822,18 @@ addHook("MapLoad", function()
 					end
 					-- yay upvalues!
 					print("Got ghost for "..score.id)
-					-- TODO combi
-					score.players[1].ghost = data
+					-- TODO stop reimplementing binary readers everywhere
+					local ghosts = {}
+					local i = 1
+					while i < #data do
+						local num, lenl, lenh = data:byte(i, i+2)
+						local len = lenl | (lenh << 8)
+						ghosts[num] = data:sub(i+3, i+3+len-1)
+						i = i + 3 + len
+					end
+					for i, p in ipairs(score.players) do
+						p.ghost = ghosts[i]
+					end
 					WriteMapStore(map)
 				end)
 			end
