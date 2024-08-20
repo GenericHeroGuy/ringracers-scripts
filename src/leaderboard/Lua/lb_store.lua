@@ -279,6 +279,18 @@ local function dumpStoreToFile(lbname, store)
 	writeIndex()
 end
 
+local function recordsIdentical(a, b)
+	if a.id ~= b.id or a.map ~= b.map or a.flags ~= b.flags or a.time ~= b.time or #a.players ~= #b.players then return false end
+	for i, s in ipairs(a.splits) do
+		if s ~= b.splits[i] then return false end
+	end
+	for i, p in ipairs(a.players) do
+		local bp = b.players[i]
+		if p.name ~= bp.name or p.skin ~= bp.skin or p.color ~= bp.color or p.stat ~= bp.stat then return false end
+	end
+	return true
+end
+
 local function mergeStore(other, iscold, deletelist)
 	-- first, get the IDs of all records in here
 	local my_mapforid = {}
@@ -304,9 +316,14 @@ local function mergeStore(other, iscold, deletelist)
 			LiveStore[my_mapforid[id].map][my_mapforid[id].i] = false
 			print(string.format("move %d %d", other_mapforid[id].map, id))
 		elseif my_mapforid[id] then
-			-- overwrite
-			LiveStore[my_mapforid[id].map][my_mapforid[id].i] = other_mapforid[id].rec
-			print(string.format("overwrite %d %d", my_mapforid[id].map, id))
+			if iscold or recordsIdentical(my_mapforid[id].rec, other_mapforid[id].rec) then
+				-- passthrough
+				print(string.format("passthrough %d %d", my_mapforid[id].map, id))
+			else
+				-- overwrite (this wipes the ghost, other rec has empty ghost)
+				LiveStore[my_mapforid[id].map][my_mapforid[id].i] = other_mapforid[id].rec
+				print(string.format("overwrite %d %d", my_mapforid[id].map, id))
+			end
 		elseif not Dirty[id] then
 			-- add
 			LiveStore[other_mapforid[id].map] = $ or {}
@@ -421,8 +438,8 @@ local function SaveRecord(score, map, modeSep)
 	if inserted then
 		score.id = NextID
 		NextID = $ + 1
-		Dirty[score.id] = true
 	end
+	Dirty[score.id] = true
 
 	print("Saving score"..(inserted and " ("..score.id..")" or ""))
 	if isserver then
@@ -431,62 +448,6 @@ local function SaveRecord(score, map, modeSep)
 	end
 end
 rawset(_G, "lb_save_record", SaveRecord)
-
-local netreceived, netdeleted
-local function netvars(net)
-	NextID = net($)
-	if isserver then
-		print("sending")
-		local send = {}
-		local highest = 0
-		local byid = {}
-		for map, records in pairs(LiveStore) do
-			for _, record in ipairs(records) do
-				if Dirty[record.id] then
-					table.insert(send, record)
-					print(record.id)
-				end
-				byid[record.id] = record
-				highest = max($, record.id)
-			end
-		end
-		-- need this in case the very latest records are deleted
-		for i in pairs(Dirty) do
-			highest = max($, i)
-		end
-		local deleted = {}
-		for i = 1, highest do
-			if not byid[i] then
-				deleted[i] = true
-			end
-		end
-		net(send, deleted)
-	else
-		netreceived, netdeleted = net("gotta wait until PlayerJoin because UnArchiveTables hasn't been run yet", "deletions yay")
-	end
-end
-addHook("NetVars", netvars)
-
-addHook("PlayerJoin", function(p)
-	if netreceived and #consoleplayer == p then
-		local newstore = {}
-		print(netreceived)
-		for i, record in pairs(netreceived) do
-			print("A new record "..i)
-			print("ID "..record.id)
-			-- TODO don't wipe ghosts for joiners! still waiting for compression
-			for _, p in ipairs(record.players) do
-				p.ghost = ""
-			end
-			newstore[record.map] = $ or {}
-			table.insert(newstore[record.map], record)
-		end
-		mergeStore(newstore, false, netdeleted)
-		dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
-	end
-	netreceived = nil
-	netdeleted = nil
-end)
 
 local function oldParseScore(str)
 	-- Leaderboard is stored in the following tab separated format
@@ -691,6 +652,53 @@ local function moveRecords(from, to, modeSep)
 	end
 end
 rawset(_G, "lb_move_records", moveRecords)
+
+local netreceived, netdeleted
+local function netvars(net)
+	NextID = net($)
+	if isserver then
+		print("sending")
+		local send = {}
+		local highest = 0
+		local byid = {}
+		for map, records in pairs(LiveStore) do
+			send[map] = {}
+			for _, record in ipairs(records) do
+				if Dirty[record.id] then
+					table.insert(send[map], record)
+					print(record.id)
+				end
+				byid[record.id] = record
+				highest = max($, record.id)
+			end
+		end
+		-- need this in case the very latest records are deleted
+		for i in pairs(Dirty) do
+			highest = max($, i)
+		end
+		local deleted = {}
+		for i = 1, highest do
+			if not byid[i] then
+				deleted[i] = true
+			end
+		end
+		local dat = writeColdStore(send)
+		net(dat, deleted)
+	else
+		netreceived, netdeleted = net("gotta wait until PlayerJoin because UnArchiveTables hasn't been run yet", "deletions yay")
+	end
+end
+addHook("NetVars", netvars)
+
+addHook("PlayerJoin", function(p)
+	if netreceived and #consoleplayer == p then
+		local newstore = loadColdStore(FakeReader(netreceived))
+		mergeStore(newstore, false, netdeleted)
+		dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
+	end
+	netreceived = nil
+	netdeleted = nil
+end)
 
 COM_AddCommand("lb_write_coldstore", function(player, filename)
 	if not filename then
