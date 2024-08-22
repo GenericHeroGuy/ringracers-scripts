@@ -10,6 +10,8 @@ local player_t = lb_player_t
 local mapChecksum = lb_map_checksum
 local mapnumFromExtended = lb_mapnum_from_extended
 local ticsToTime = lb_TicsToTime
+local StringReader = lb_string_reader
+local StringWriter = lb_string_writer
 
 ----------------------------
 
@@ -73,78 +75,6 @@ local function insertOrReplace(dest, score, modeSep)
 	return true
 end
 
-local function READ8(f)
-	return f:read(1):byte()
-end
-local function READ16(f)
-	local nl, nh = f:read(2):byte(1, 2)
-	return nl | (nh << 8)
-end
-local function READNUM(f)
-	local num = 0
-	for i = 0, 7*(5-1), 7 do
-		local c = f:read(1):byte()
-		num = num | (c & 0x7f) << i
-		if not (c & 0x80) then return num end
-	end
-	error("Overlong number at "..f:seek("cur", 0), 2)
-end
-local function READSTR(f)
-	local len = f:read(1):byte()
-	return f:read(len) or ""
-end
-local function READGHOST(f)
-	local ll, lh = f:read(2):byte(1, 2)
-	return f:read(ll | (lh << 8)) or ""
-end
-
--- write functions go into a string buffer, not a file
--- if something goes wrong, you won't end up with a half-written file
-local tins = table.insert
-local function WRITE8(f, num)
-	tins(f, string.char(num))
-end
-local function WRITE16(f, num)
-	tins(f, string.char(num & 0xffff00ff, (num & 0xffffff00) >> 8))
-end
-local function WRITENUM(f, num)
-	if num < 0 then
-		error("Cannot write negative numbers", 2)
-	end
-	repeat
-		tins(f, string.char((num >= 128 and 0x80 or 0x00) | (num & 0x7f)))
-		num = num >> 7
-	until not num
-end
-local function WRITESTR(f, str)
-	if #str > 255 then
-		error("String too long", 2)
-	end
-	tins(f, string.char(#str))
-	tins(f, str)
-end
-local function WRITEGHOST(f, str) -- more like WRITELONGSTR but eh
-	if #str > 65535 then
-		error("String too long", 2)
-	end
-	tins(f, string.char(#str & 0xff, #str >> 8))
-	tins(f, str)
-end
-
--- a file that is actually reading from a string
-local function FakeReader(str)
-	return {
-		str, 1,
-		read = function(self, num)
-			if not num then return #self[1] > self[2] and "" or nil end
-			local s = self[1]:sub(self[2], self[2]+num-1)
-			self[2] = $ + num
-			return s
-		end,
-		close = do end
-	}
-end
-
 local function postfix(filename, str)
 	local i = #filename - filename:reverse():find(".", 1, true)
 	return filename:sub(1, i)..str..filename:sub(i+1)
@@ -180,33 +110,35 @@ local function read_segmented(filename)
 		if not (f and f:read(0)) then
 			break
 		end
-		tins(data, f:read("*a"))
+		table.insert(data, f:read("*a"))
 		f:close()
 		fnum = $ + 1
 	end
 	data = table.concat($)
-	return #data and FakeReader(data) or nil
+	return #data and StringReader(data) or nil
 end
 
 local function writeMapStore(mapnum, records, withghosts)
-	local f = { "LEADERBOARD", string.char(LEADERBOARD_VERSION) }
-	WRITE16(f, tonumber(mapChecksum(mapnum) or "0", 16))
-	WRITENUM(f, #records)
+	local f = StringWriter()
+	f:writeliteral("LEADERBOARD")
+	f:write8(LEADERBOARD_VERSION)
+	f:write16(tonumber(mapChecksum(mapnum) or "0", 16))
+	f:writenum(#records)
 	for _, record in ipairs(records) do
-		WRITENUM(f, record.id)
-		WRITENUM(f, record.flags)
-		WRITENUM(f, record.time)
-		WRITE8(f, #record.splits)
+		f:writenum(record.id)
+		f:writenum(record.flags)
+		f:writenum(record.time)
+		f:write8(#record.splits)
 		for _, v in ipairs(record.splits) do
-			WRITENUM(f, v)
+			f:writenum(v)
 		end
-		WRITE8(f, #record.players)
+		f:write8(#record.players)
 		for _, p in ipairs(record.players) do
-			WRITESTR(f, p.name)
-			WRITESTR(f, p.skin)
-			WRITE8(f, p.color)
-			WRITE8(f, p.stat)
-			WRITEGHOST(f, withghosts and p.ghost or "")
+			f:writestr(p.name)
+			f:writestr(p.skin)
+			f:write8(p.color)
+			f:write8(p.stat)
+			f:writelstr(withghosts and p.ghost or "")
 		end
 	end
 	if not next(records) then
@@ -219,27 +151,28 @@ rawset(_G, "lb_write_map_store", function(map)
 end)
 
 local function writeColdStore(store)
-	local f = { "COLDSTORE" }
-	WRITESTR(f, cv_directory.string)
+	local f = StringWriter()
+	f:writeliteral("COLDSTORE")
+	f:writestr(cv_directory.string)
 	for map, records in pairs(store) do
-		WRITENUM(f, map)
-		WRITE16(f, tonumber(mapChecksum(map) or "0", 16))
-		WRITENUM(f, #records)
+		f:writenum(map)
+		f:write16(tonumber(mapChecksum(map) or "0", 16))
+		f:writenum(#records)
 		for _, record in ipairs(records) do
-			WRITENUM(f, record.id)
-			WRITENUM(f, record.flags)
-			WRITENUM(f, record.time)
-			WRITE8(f, #record.splits)
+			f:writenum(record.id)
+			f:writenum(record.flags)
+			f:writenum(record.time)
+			f:write8(#record.splits)
 			for _, v in ipairs(record.splits) do
-				WRITENUM(f, v)
+				f:writenum(v)
 			end
-			WRITE8(f, #record.players)
+			f:write8(#record.players)
 			for _, p in ipairs(record.players) do
-				WRITESTR(f, p.name)
-				WRITESTR(f, p.skin)
-				WRITE8(f, p.color)
-				WRITE8(f, p.stat)
-				WRITEGHOST(f, "")
+				f:writestr(p.name)
+				f:writestr(p.skin)
+				f:write8(p.color)
+				f:write8(p.stat)
+				f:writelstr("")
 			end
 		end
 	end
@@ -247,11 +180,11 @@ local function writeColdStore(store)
 end
 
 local function writeIndex()
-	local f = {}
-	WRITE8(f, INDEX_VERSION)
-	WRITENUM(f, NextID)
+	local f = StringWriter()
+	f:write8(INDEX_VERSION)
+	f:writenum(NextID)
 	for v in pairs(Dirty) do
-		WRITENUM(f, v)
+		f:writenum(v)
 	end
 	local out = io.open(string.format("%s/%s.sav2", cv_directory.string, "index"), "wb")
 	out:write(table.concat(f))
@@ -259,17 +192,16 @@ local function writeIndex()
 end
 
 local function loadIndex()
-	local f = io.open(string.format("%s/%s.sav2", cv_directory.string, "index"), "rb")
-	if READ8(f) > INDEX_VERSION then
+	local f = StringReader(io.open(string.format("%s/%s.sav2", cv_directory.string, "index"), "rb"))
+	if f:read8() > INDEX_VERSION then
 		error("Failed to load index (too new)", 2)
 	end
-	NextID = READNUM(f)
+	NextID = f:readnum()
 	Dirty = {}
 	print("Loading index")
-	while f:read(0) do
-		Dirty[READNUM(f)] = true
+	while not f:empty() do
+		Dirty[f:readnum()] = true
 	end
-	f:close()
 end
 
 local function dumpStoreToFile(lbname, store)
@@ -515,24 +447,24 @@ local function convertToBinary(f)
 end
 
 local function parseScoreBinary(f, map)
-	local id = READNUM(f)
-	local flags = READNUM(f)
-	local time = READNUM(f)
+	local id = f:readnum()
+	local flags = f:readnum()
+	local time = f:readnum()
 
 	local splits = {}
-	local numsplits = READ8(f)
+	local numsplits = f:read8()
 	for i = 1, numsplits do
-		table.insert(splits, READNUM(f))
+		table.insert(splits, f:readnum())
 	end
 
 	local players = {}
-	local numplayers = READ8(f)
+	local numplayers = f:read8()
 	for i = 1, numplayers do
-		local name = READSTR(f)
-		local skin = READSTR(f)
-		local color = READ8(f)
-		local stats = READ8(f)
-		local ghost = READGHOST(f)
+		local name = f:readstr()
+		local skin = f:readstr()
+		local color = f:read8()
+		local stats = f:read8()
+		local ghost = f:readlstr()
 		table.insert(players, player_t(name, skin, color, stat_t(stats >> 4, stats & 0xf), ghost))
 	end
 
@@ -549,16 +481,16 @@ end
 local function loadStore(f, filename, map)
 	local store = {}
 
-	if f:read(11) ~= "LEADERBOARD" then
+	if f:readliteral(11) ~= "LEADERBOARD" then
 		error(string.format("Failed to read %s: bad magic", filename), 2)
 	end
-	local version = READ8(f)
+	local version = f:read8()
 	if version > LEADERBOARD_VERSION then
 		error(string.format("Failed to read %s: version %d not supported (highest is %d)", filename, version, LEADERBOARD_VERSION), 2)
 	end
 
-	local checksum = READ16(f)
-	local numrecords = READNUM(f)
+	local checksum = f:read16()
+	local numrecords = f:readnum()
 	for i = 1, numrecords do
 		local score = parseScoreBinary(f, map)
 		if score then
@@ -566,23 +498,21 @@ local function loadStore(f, filename, map)
 		end
 	end
 
-	f:close()
-
 	return store
 end
 
 local function loadColdStore(f)
 	local store = {}
 
-	if f:read(9) ~= "COLDSTORE" then
+	if f:readliteral(9) ~= "COLDSTORE" then
 		error("Failed to read cold store: bad magic", 2)
 	end
-	local servername = READSTR(f)
+	local servername = f:readstr()
 
-	while f:read(0) do
-		local mapnum = READNUM(f)
-		local checksum = READ16(f)
-		local numrecords = READNUM(f)
+	while not f:empty() do
+		local mapnum = f:readnum()
+		local checksum = f:read16()
+		local numrecords = f:readnum()
 		for i = 1, numrecords do
 			local score = parseScoreBinary(f, mapnum)
 			if score then
@@ -591,8 +521,6 @@ local function loadColdStore(f)
 			end
 		end
 	end
-
-	f:close()
 
 	return store
 end
@@ -613,7 +541,7 @@ end
 
 local function AddColdStoreBinary(str)
 	loadIndex()
-	local f = FakeReader(lb_base128_decode(str))
+	local f = StringReader(lb_base128_decode(str))
 	local store = loadColdStore(f)
 	mergeStore(store, true)
 end
@@ -692,7 +620,7 @@ addHook("NetVars", netvars)
 
 addHook("PlayerJoin", function(p)
 	if netreceived and #consoleplayer == p then
-		local newstore = loadColdStore(FakeReader(netreceived))
+		local newstore = loadColdStore(StringReader(netreceived))
 		mergeStore(newstore, false, netdeleted)
 		dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
 	end

@@ -50,9 +50,15 @@ rawset(_G, "lb_stat_t", function(speed, weight)
 	return (speed << 4) | weight
 end)
 
+rawset(_G, "lb_flag_spbatk", 0x1)
+rawset(_G, "lb_flag_spbjus", 0x2)
+rawset(_G, "lb_flag_spbbig", 0x4)
+rawset(_G, "lb_flag_spbexp", 0x8)
+rawset(_G, "lb_flag_encore", 0x80)
+rawset(_G, "lb_flag_combi", 0x10)
+local F_SPBBIG = lb_flag_spbbig
+local F_SPBEXP = lb_flag_spbexp
 
-local F_SPBBIG = 0x4
-local F_SPBEXP = 0x8
 -- True if a is better than b
 rawset(_G, "lb_comp", function(a, b)
 	-- Calculates the difficulty, harder has higher priority
@@ -112,60 +118,109 @@ rawset(_G, "lb_mapnum_from_extended", function(map)
 	return mapnum
 end)
 
-local eventHandler = {}
+-- ok, this is a fucking eyesore... but integer keys are faster than string keys
+-- and i do NOT want any lag spikes when reading from ~~files~~ strings, so, sigh
+-- [1] = the string, [2] = position, [3] = length of string
 
-rawset(_G, "lb_hook", function(event, callback)
-	local handle = eventHandler[event] or {}
-	table.insert(handle, callback)
-	eventHandler[event] = handle
+local reader = { __index = {
+	read8 = function(self)
+		local p = self[2]
+		local num = self[1]:byte(p)
+		self[2] = p + 1
+		return num
+	end,
+	read16 = function(self)
+		local p = self[2]
+		local lo, hi = self[1]:byte(p, p + 1)
+		self[2] = p + 2
+		return lo | (hi << 8)
+	end,
+	readnum = function(self)
+		local num = 0
+		local s, p = self[1], self[2]
+		for i = 0, 7*(5-1), 7 do
+			local c = s:byte(p)
+			p = p + 1
+			num = num | ((c & 0x7f) << i)
+			if not (c & 0x80) then
+				self[2] = p
+				return num
+			end
+		end
+		error("Overlong number at "..(p - 5))
+	end,
+	readstr = function(self)
+		local s, p = self[1], self[2]
+		local len = s:byte(p)
+		p = p + 1 + len
+		self[2] = p
+		return s:sub(p - len, p - 1)
+	end,
+	readlstr = function(self)
+		local s, p = self[1], self[2]
+		local ll, lh = s:byte(p, p + 1)
+		local len = ll | (lh << 8)
+		p = p + 2 + len
+		self[2] = p
+		return s:sub(p - len, p - 1)
+	end,
+	readliteral = function(self, len)
+		local p = self[2]
+		p = p + len
+		self[2] = p
+		return self[1]:sub(p - len, p - 1)
+	end,
+	empty = function(self)
+		return self[2] > self[3]
+	end
+} }
+
+rawset(_G, "lb_string_reader", function(data)
+	local str = data
+	if type(data) == "userdata" then
+		-- oh it's a file!
+		str = data:read("*a")
+		data:close()
+	end
+	return setmetatable({ str, 1, #str }, reader)
 end)
 
-rawset(_G, "lb_fire_event", function(event, ...)
-	local handle = eventHandler[event]
-	if not handle then return end
+-- write functions go into a string buffer, not a file
+-- if something goes wrong, you won't end up with a half-written file
+-- these functions are intentionally written to trigger overflows on bad input
 
-	for _, callback in ipairs(handle) do
-		pcall(callback, ...)
+local tins = table.insert
+local schar = string.char
+local writer = { __index = {
+	write8 = function(self, num)
+		tins(self, schar(num))
+	end,
+	write16 = function(self, num)
+		tins(self, schar(num & 0xff, num >> 8))
+	end,
+	writenum = function(self, num)
+		if num < 0 then
+			error("Cannot write negative numbers", 2)
+		end
+		repeat
+			tins(self, schar((num >= 128 and 0x80 or 0x00) | (num & 0x7f)))
+			num = num >> 7
+		until not num
+	end,
+	writestr = function(self, str)
+		tins(self, schar(#str))
+		tins(self, str)
+	end,
+	writelstr = function(self, str)
+		local len = #str
+		tins(self, schar(len & 0xff, len >> 8))
+		tins(self, str)
+	end,
+	writeliteral = function(self, str)
+		tins(self, str)
 	end
+} }
+
+rawset(_G, "lb_string_writer", function()
+	return setmetatable({}, writer)
 end)
-
-local b62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-local function base62_encode(n)
-	if n <= 0 then return "0" end
-	local b62 = b62
-	local q = n
-	local r = ""
-	local t
-	while q > 0 do
-		t = q % 62 + 1
-		r = b62:sub(t, t)..r
-		q = q / 62
-	end
-	return r
-end
-
-local function base62_decode(s)
-	local n = b62:find(s:sub(1,1)) - 1
-	for i = 2, #s do
-		n = n * 62 + b62:find(s:sub(i, i)) - 1
-	end
-
-	return n
-end
-
-local function neg_base62_encode(n)
-	if n == INT32_MIN then
-		return "-2lkCB2"
-	end
-
-	if n < 0 then return "-"..base62_encode(abs(n)) end
-	return base62_encode(n)
-end
-
-local function neg_base62_decode(s)
-	if s:sub(1, 1) == "-" then return -base62_decode(s:sub(2)) end
-	return base62_decode(s)
-end
-
-rawset(_G, "lb_base62_encode", neg_base62_encode)
-rawset(_G, "lb_base62_decode", neg_base62_decode)

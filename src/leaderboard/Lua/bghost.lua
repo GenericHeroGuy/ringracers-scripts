@@ -1,3 +1,12 @@
+-- binary ghosts
+
+---- Imported functions ----
+
+-- lb_common.lua
+local StringReader = lb_string_reader
+
+-----------------------------
+
 local EXP0 = FRACBITS+12
 local EXP1 = FRACBITS+8
 local EXP2 = FRACBITS+4
@@ -355,20 +364,6 @@ end)
 local replayers = {}
 local ghostwatching, ghostcam
 
--- a file that is actually reading from a string
-local function FakeReader(str)
-	return {
-		str, 1,
-		read = function(self, num)
-			if not num then return #self[1] > self[2] and "" or nil end
-			local s = self[1]:sub(self[2], self[2]+num-1)
-			self[2] = $ + num
-			return s
-		end,
-		close = do end
-	}
-end
-
 -- spawns an mobj that doesn't sync in netgames
 local function SpawnLocal(x, y, z, type)
 	local oldflags = mobjinfo[type].flags
@@ -378,7 +373,7 @@ local function SpawnLocal(x, y, z, type)
 	return mo
 end
 
-local F_COMBI = 0x10
+local F_COMBI = lb_flag_combi
 
 -- spawns a ghost's half of the combi link
 local function SpawnCombiLink(r)
@@ -404,7 +399,7 @@ local function PlayGhost(record)
 		mo.color = recplayer.color
 
 		local ghost = setmetatable({
-			file = FakeReader(recplayer.ghost),
+			file = StringReader(recplayer.ghost),
 			name = recplayer.name,
 			mo = mo,
 			gmomx = 0,
@@ -474,7 +469,6 @@ local function StopPlaying(replay)
 	for _, v in pairs(replay.combilink) do
 		P_RemoveMobj(v)
 	end
-	replay.file:close()
 	replayers[replay] = nil
 	if ghostwatching == replay then NextWatch() end
 end
@@ -589,10 +583,10 @@ addHook("ThinkFrame", function()
 	end
 
 	for r in pairs(replayers) do
-		if r.file and r.file:read(0) then
+		if not r.file:empty() then
 			local flags
 			repeat -- for all the specials
-				flags = r.file:read(1):byte()
+				flags = r.file:read8()
 				if flags == GS_SNEAKER or flags == GS_STARTBOOST then
 					r.sneakertimer = flags == GS_SNEAKER and TICRATE + (TICRATE/3) or 70
 					if not (r.boostflame and r.boostflame.valid) then
@@ -617,10 +611,10 @@ addHook("ThinkFrame", function()
 				end
 			until flags & 0x80 == 0
 
-			local dx = (flags & 0x10) and BloatToFixed(r.file:read(1):byte())
-			local dy = (flags & 0x10) and BloatToFixed(r.file:read(1):byte())
-			local dz = (flags & 0x20) and BloatToFixed(r.file:read(1):byte())
-			local da = (flags & 0x40) and BloatToFixed(r.file:read(1):byte())
+			local dx = (flags & 0x10) and BloatToFixed(r.file:read8())
+			local dy = (flags & 0x10) and BloatToFixed(r.file:read8())
+			local dz = (flags & 0x20) and BloatToFixed(r.file:read8())
+			local da = (flags & 0x40) and BloatToFixed(r.file:read8())
 			local frame, fspecial = ReadFakeFrame(flags & 0x0f, r.mo.skin)
 
 			r.fakeframe = flags & 0x0f

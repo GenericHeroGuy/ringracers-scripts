@@ -5,6 +5,13 @@
 -- it's less compact, but i'm not in the mood for bigint math
 -- plus it helps to know how long the output will be so you can control the netxcmd bandwidth used
 
+---- Imported functions ----
+
+-- lb_common.lua
+local StringWriter = lb_string_writer
+
+----------------------------
+
 local tohex = {}
 for i = 0, 255 do
 	tohex[string.char(i)] = string.format("%02x_", i)
@@ -148,18 +155,20 @@ local packets = {
 					return
 				end
 				local maprecords = lb_get_map_records(gamemap, -1)
-				local ghostdata = ""
+				local ghostdata = StringWriter()
 				for mode, records in pairs(maprecords) do
 					for _, record in ipairs(records) do
 						if record.id == recordid then
 							-- gotcha!
 							for i, p in ipairs(record.players) do
-								ghostdata = $..string.char(i, #p.ghost & 0xff, #p.ghost >> 8)..p.ghost
+								ghostdata:write8(i)
+								ghostdata:writelstr(p.ghost)
 							end
 						end
 					end
 				end
 				if not #ghostdata then print("no data"); return end
+				ghostdata = table.concat($)
 				local tx = {
 					data = ghostdata,
 					state = "sending",

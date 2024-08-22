@@ -11,7 +11,7 @@ local mapChecksum = lb_map_checksum
 local score_t = lb_score_t
 local player_t = lb_player_t
 local mapnumFromExtended = lb_mapnum_from_extended
-local fireEvent = lb_fire_event
+local StringReader = lb_string_reader
 
 -- browser.lua
 local InitBrowser = InitBrowser
@@ -70,14 +70,14 @@ local FILENAME = "leaderboard.txt"
 local nextMap = nil
 
 local Flags = 0
-local F_COMBI = 0x10
-local F_ENCORE = 0x80
+local F_COMBI = lb_flag_combi
+local F_ENCORE = lb_flag_encore
 
 -- SPB flags with the least significance first
-local F_SPBATK = 0x1
-local F_SPBJUS = 0x2
-local F_SPBBIG = 0x4
-local F_SPBEXP = 0x8
+local F_SPBATK = lb_flag_spbatk
+local F_SPBJUS = lb_flag_spbjus
+local F_SPBBIG = lb_flag_spbbig
+local F_SPBEXP = lb_flag_spbexp
 
 -- Score table separator
 local ST_SEP = F_SPBATK | F_COMBI
@@ -121,9 +121,6 @@ local clamp
 local scroll_to
 
 local allowJoin
-
--- Events
-local EVENT_FINISH = "Finish"
 
 
 -- cvars
@@ -822,14 +819,11 @@ addHook("MapLoad", function()
 					end
 					-- yay upvalues!
 					print("Got ghost for "..score.id)
-					-- TODO stop reimplementing binary readers everywhere
 					local ghosts = {}
-					local i = 1
-					while i < #data do
-						local num, lenl, lenh = data:byte(i, i+2)
-						local len = lenl | (lenh << 8)
-						ghosts[num] = data:sub(i+3, i+3+len-1)
-						i = i + 3 + len
+					data = StringReader(data)
+					while not data:empty() do
+						local i = data:read8()
+						ghosts[i] = data:readlstr()
 					end
 					for i, p in ipairs(score.players) do
 						p.ghost = ghosts[i]
@@ -1355,9 +1349,6 @@ local function saveTime(player)
 	if checkFlags(player) != Flags then
 		print("Game mode change detected! Time has been disqualified.")
 		S_StartSound(nil, 110)
-		fireEvent(EVENT_FINISH, {
-			disqualified = true,
-		})
 		return
 	end
 
@@ -1393,7 +1384,6 @@ local function saveTime(player)
 			FlashRate = 3
 			FlashVFlags = RedFlash
 			scroll_to(player)
-			fireEvent(EVENT_FINISH, {score = newscore})
 			return
 		end
 	end
@@ -1412,13 +1402,6 @@ local function saveTime(player)
 
 	-- Set the updated ScoreTable
 	ScoreTable = MapRecords[ST_SEP & Flags]
-
-	for i, score in ipairs(ScoreTable) do
-		if isSameRecord(newscore, score, 0) then
-			fireEvent(EVENT_FINISH, {position = i, score = newscore})
-			break
-		end
-	end
 
 	-- Scroll the gui to the player entry
 	scroll_to(player)

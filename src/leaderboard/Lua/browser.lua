@@ -193,12 +193,12 @@ local function drawMapStrings(v)
     end
 end
 
-local F_SPBATK = 0x1
-local F_SPBJUS = 0x2
-local F_SPBBIG = 0x4
-local F_SPBEXP = 0x8
-local F_COMBI = 0x10
-local F_ENCORE = 0x80
+local F_SPBATK = lb_flag_spbatk
+local F_SPBJUS = lb_flag_spbjus
+local F_SPBBIG = lb_flag_spbbig
+local F_SPBEXP = lb_flag_sbpexp
+local F_COMBI = lb_flag_combi
+local F_ENCORE = lb_flag_encore
 
 local function drawGamemode(v)
 	local m = modes[mode] or 0
