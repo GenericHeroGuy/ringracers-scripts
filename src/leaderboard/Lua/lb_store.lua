@@ -327,10 +327,10 @@ rawset(_G, "lb_map_list", MapList)
 
 -- GLOBAL
 -- Construct the leaderboard table of the supplied mapid
-local function GetMapRecords(map, modeSep)
+local function GetMapRecords(map, modeSep, checksum)
 	local mapRecords = {}
 
-	local store = LiveStore[map] and LiveStore[map][mapChecksum(map)]
+	local store = LiveStore[map] and LiveStore[map][checksum or mapChecksum(map)]
 	if not store then return mapRecords end
 
 	for _, record in ipairs(store) do
@@ -547,35 +547,36 @@ rawset(_G, "lb_add_coldstore_binary", AddColdStoreBinary)
 
 -- GLOBAL
 -- Command for moving records from one map to another
-local function moveRecords(from, to, modeSep)
-	local function moveRecordsInStore(store)
-		if not store[from.id] then
-			return 0
-		end
-
-		store[to.id] = $ or {}
-		for i, score in ipairs(store[from.id]) do
-			score.map = to.id
-			insertOrReplace(store[to.id], score, modeSep)
-		end
-
-		-- Destroy the original table
-		store[from.id] = nil
+-- if targetmap is -1, deletes records
+local function moveRecords(sourcemap, sourcesum, targetmap, targetsum, modeSep)
+	if not (LiveStore[sourcemap] and LiveStore[sourcemap][sourcesum]) then
+		return 0
 	end
 
-	-- move livestore records and write to disk
-	moveRecordsInStore(LiveStore)
+	local moved = 0
+	if targetmap ~= -1 then
+		LiveStore[targetmap] = $ or {}
+		LiveStore[targetmap][targetsum] = $ or {}
+		for i, score in ipairs(LiveStore[sourcemap][sourcesum]) do
+			score.map = targetmap
+			Dirty[score.id] = true
+			insertOrReplace(LiveStore[targetmap][targetsum], score, modeSep)
+			moved = $ + 1
+		end
+	else
+		moved = #LiveStore[sourcemap][sourcesum]
+	end
+
+	-- Destroy the original table
+	LiveStore[sourcemap][sourcesum] = nil
 
 	if isserver then
-		dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
-
-		-- move coldstore records
-		local ok, coldstore = pcall(loadStoreFile, COLDSTORE_FILE)
-		if ok and coldstore then
-			moveRecordsInStore(coldstore)
-			dumpStoreToFile(COLDSTORE_FILE, coldstore)
-		end
+		writeMapStore(sourcemap, LiveStore[sourcemap])
+		if targetmap ~= -1 then writeMapStore(targetmap, LiveStore[targetmap]) end
+		writeIndex()
 	end
+
+	return moved
 end
 rawset(_G, "lb_move_records", moveRecords)
 
@@ -689,18 +690,6 @@ COM_AddCommand("lb_known_maps", function(player, map)
 	end
 end, COM_LOCAL)
 
-COM_AddCommand("lb_download_live_records", function(player, filename)
-	if not filename then
-		CONS_Printf(player, "Usage: lb_download_live_records <filename>")
-		return
-	end
-
-	if filename:sub(#filename-4) != ".sav2" then
-		filename = $..".sav2"
-	end
-	dumpStoreToFile(filename, LiveStore)
-end, COM_LOCAL)
-
 COM_AddCommand("lb_convert_to_binary", function(player, filename)
 	filename = $ or LEADERBOARD_FILE_OLD
 	local f = io.open(filename)
@@ -723,29 +712,6 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 	Dirty = {}
 
 	dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
-end, COM_LOCAL)
-
-COM_AddCommand("lb_wipe_records", function()
-	local map = gamemap
-	for i, record in ipairs(LiveStore[map][mapChecksum(map)]) do
-		LiveStore[map][mapChecksum(map)][i] = nil
-		Dirty[record.id] = true
-	end
-	LiveStore[map][mapChecksum(map)] = nil
-	dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
-end, COM_LOCAL)
-
--- very ugly test command
-COM_AddCommand("lb_move", function()
-	local test = LiveStore[1][mapChecksum(1)][1]
-	LiveStore[1][mapChecksum(1)][1] = nil
-	LiveStore[2] = {}
-	LiveStore[2][mapChecksum(2)] = { test }
-	test.map = 2
-	Dirty[test.id] = true
-	writeMapStore(1, LiveStore[1])
-	writeMapStore(2, LiveStore[2])
-	writeIndex()
 end, COM_LOCAL)
 
 -- Load the livestore

@@ -90,9 +90,17 @@ rawset(_G, "lb_map_checksum", function(mapnum)
 end)
 
 rawset(_G, "lb_mapnum_from_extended", function(map)
-	local p, q = map:upper():match("MAP(%w)(%w)$", 1)
+	local p, q, checksum = map:upper():match("MAP(%w)(%w):?(.*)$", 1)
 	if not (p and q) then
 		return nil
+	end
+
+	if #checksum and #checksum ~= 4 or checksum:match("[^0-9A-F]") then
+		checksum = false -- malformed
+	elseif not #checksum then
+		checksum = nil -- missing
+	else
+		checksum = $:lower()
 	end
 
 	local mapnum = 0
@@ -115,7 +123,7 @@ rawset(_G, "lb_mapnum_from_extended", function(map)
 		mapnum = 36 * p + qn + 100
 	end
 
-	return mapnum
+	return mapnum, checksum
 end)
 
 -- ok, this is a fucking eyesore... but integer keys are faster than string keys

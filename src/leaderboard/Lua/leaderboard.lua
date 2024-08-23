@@ -320,7 +320,7 @@ local function doyoudare(player)
 	return true
 end
 
-local function retry(player, ...)
+COM_AddCommand("retry", function(player)
 	if doyoudare(player) then
 		-- Verify valid race level
 		if not (mapheaderinfo[gamemap].typeoflevel & (TOL_SP | TOL_RACE)) then
@@ -334,17 +334,15 @@ local function retry(player, ...)
 		end
 		nextMap = G_BuildMapName(gamemap)
 	end
-end
-COM_AddCommand("retry", retry)
+end)
 
-local function exitlevel(player, ...)
+COM_AddCommand("exit", function(player)
 	if doyoudare(player) then
 		G_ExitLevel()
 	end
-end
-COM_AddCommand("exit", exitlevel)
+end)
 
-local function initBrowser(player)
+COM_AddCommand("levelselect", function(player)
 	if not doyoudare(player) then return end
 
 	-- TODO: allow in battle
@@ -363,12 +361,9 @@ local function initBrowser(player)
 	BrowserPlayer = player
 
 	player.afkTime = leveltime
-end
-COM_AddCommand("levelselect", initBrowser)
+end)
 
-local function findMap(player, ...)
-	local search = ...
-
+COM_AddCommand("findmap", function(player, search)
 	local hell = "\x85HELL"
 	local tol = {
 		[TOL_SP] = "\x81Race\x80", -- Nuked race maps
@@ -395,23 +390,19 @@ local function findMap(player, ...)
 				or string.format("%s \x82%-2d\x80", lvltype, map.numlaps)
 
 
-			CONS_Printf(
-				player,
-				string.format(
-					"%s (#%s) %-9s %-30s - %s\t%s%s",
+			print(string.format(
+					"%s%s (#%s) %-9s %-30s - %s\t%s",
 					G_BuildMapName(i),
+					(player == server or IsPlayerAdmin(player)) and "\x86:"..mapChecksum(i).."\x80" or "",
 					i,
 					lvltype,
 					lvlttl,
 					map.subttl,
-					(map.menuflags & LF2_HIDEINMENU and hell) or "",
-                    (player == server or IsPlayerAdmin(player)) and " (checksum = "..mapChecksum(i)..")" or ""
-				)
-			)
+					(map.menuflags & LF2_HIDEINMENU and hell) or ""
+			))
 		end
 	end
-end
-COM_AddCommand("findmap", findMap)
+end, COM_LOCAL)
 
 local SPBModeSym = {
 	[F_SPBEXP] = "X",
@@ -436,90 +427,81 @@ local function modeToString(mode)
 	return modestr
 end
 
-local function records(player, ...)
-	local mapid = ...
+COM_AddCommand("records", function(_, mapid)
 	local mapnum = gamemap
-	local mapRecords = MapRecords
+	local checksum
 
 	if mapid then
-		mapnum = mapnumFromExtended(mapid)
+		mapnum, checksum = mapnumFromExtended(mapid)
 		if not mapnum then
-			CONS_Printf(player, string.format("Invalid map name: %s", mapid))
+			print(string.format("Invalid map name: %s", mapid))
 			return
 		end
+	end
 
-		mapRecords = GetMapRecords(mapnum, ST_SEP)
+	local mapRecords = GetMapRecords(mapnum, ST_SEP, checksum or nil)
+	if next(mapRecords) == nil then
+		print(string.format(
+			checksum == false and "Invalid checksum for %s"
+			or "No records found for %s"..(checksum == nil and ", please provide a checksum (hint: lb_known_maps)" or ""),
+			mapid or G_BuildMapName()
+		))
+		return
 	end
 
 	local map = mapheaderinfo[mapnum]
 	if map then
-		CONS_Printf(player,
-			string.format(
-				"\x83%s%8s",
-				map.lvlttl,
-				(map.menuflags & LF2_HIDEINMENU and "\x85HELL") or ""
-			)
-		)
+		print(string.format(
+			"\x83%s%8s",
+			map.lvlttl,
+			(map.menuflags & LF2_HIDEINMENU) and "\x85HELL" or ""
+		))
 
 		local zoneact = zoneAct(map)
 		-- print the zone/act on the right hand size under the title
-		CONS_Printf(
-			player,
-			string.format(
-				string.format("\x83%%%ds%%s\x80 - \x88%%s", #map.lvlttl - #zoneact / 2 - 1),
-				" ",
-				zoneAct(map),
-				map.subttl
-			)
-		)
+		print(string.format(
+			string.format("\x83%%%ds%%s\x80 - \x88%%s", #map.lvlttl - #zoneact / 2 - 1),
+			" ",
+			zoneAct(map),
+			map.subttl
+		))
 	else
-		CONS_Printf(player, "\x85UNKNOWN MAP")
+		print("\x85UNKNOWN MAP")
 	end
 
 	for mode, records in pairs(mapRecords) do
-		CONS_Printf(player, "")
-		CONS_Printf(player, modeToString(mode))
+		print("")
+		print(modeToString(mode))
 
 		-- don't print flags for time attack
-		if mode then
-			for i, score in ipairs(records) do
-				CONS_Printf(
-					player,
-					string.format(
-						"%2d %-21s \x89%8s \x80%s",
-						i,
-						score["name"],
-						ticsToTime(score["time"]),
-						modeToString(score["flags"])
-					)
-				)
+		for i, score in ipairs(records) do
+			local names = {}
+			for _, p in ipairs(score.players) do
+				table.insert(names, (SG_Color2Chat and SG_Color2Chat[p.color] or "")..p.name)
 			end
-		else
-			for i, score in ipairs(records) do
-				CONS_Printf(
-					player,
-					string.format(
-						"%2d %-21s \x89%8s",
-						i,
-						score["name"],
-						ticsToTime(score["time"])
-					)
-				)
+			print(string.format(
+				"[%5d] %2d %-21s \x89%s"..(mode and " \x80%s" or ""),
+				score.id,
+				i,
+				names[1],
+				ticsToTime(score["time"]),
+				mode and modeToString(score["flags"]) or nil
+			))
+			for i = 2, #names do
+				print(string.format(
+					"           & %s",
+					names[i]
+				))
 			end
 		end
 	end
-end
-COM_AddCommand("records", records)
+end, COM_LOCAL)
 
-local function changelevel(player, ...)
-	if not doyoudare(player) then
-		return
-	end
-	if leveltime < 20 then
+COM_AddCommand("changelevel", function(player, map)
+	if not doyoudare(player) or leveltime < 20 then
 		return
 	end
 
-	local map = ...
 	if map == nil then
 		CONS_Printf(player, "Usage: changelevel MAPXX")
 		return
@@ -542,10 +524,9 @@ local function changelevel(player, ...)
 	end
 
 	nextMap = G_BuildMapName(mapnum)
-end
-COM_AddCommand("changelevel", changelevel)
+end)
 
-local function toggleEncore(player)
+COM_AddCommand("encore", function(player)
 	if not doyoudare(player) then
 		return
 	end
@@ -560,18 +541,16 @@ local function toggleEncore(player)
 	else
 		COM_BufInsertText(server, "kartencore on")
 	end
-end
-COM_AddCommand("encore", toggleEncore)
+end)
 
-local function spba_clearcheats(player)
+COM_AddCommand("spba_clearcheats", function(player)
 	if not player.spectator then
 		clearcheats = true
 		CONS_Printf(player, "SPB Attack cheats will be cleared on next round")
 	end
-end
-COM_AddCommand("spba_clearcheats", spba_clearcheats)
+end)
 
-local function scrollGUI(player, ...)
+COM_AddCommand("scroll", function(player)
 	if not doyoudare(player) then return end
 
 	if drawState == DS_DEFAULT then
@@ -579,15 +558,13 @@ local function scrollGUI(player, ...)
 	else
 		drawState = DS_DEFAULT
 	end
-end
-COM_AddCommand("scroll", scrollGUI)
+end)
 
-local function findRival(player, ...)
-	local rival, page = ...
+COM_AddCommand("rival", function(player, rival, page)
 	page = (tonumber(page) or 1) - 1
 
 	if rival == nil then
-		CONS_Printf(player, "Print the times of your rival.\nUsage: rival <playername> <page>")
+		print("Print the times of your rival.\nUsage: rival <playername> <page>")
 		return
 	end
 
@@ -606,31 +583,28 @@ local function findRival(player, ...)
 	local totalScores = 0
 	local totalDiff = 0
 
-	CONS_Printf(player, string.format("\x89%s's times:", rival))
-	CONS_Printf(player, "MAP   CHCK	 Time		  Diff		Mode")
+	print(string.format("\x89%s's times:", rival))
+	print("MAP\tTime\tDiff    \tMode")
 
 	local maplist = MapList()
-	local mapRecords
-	local rivalScore
-	local yourScore
 	for i = 1, #maplist do
-		mapRecords = GetMapRecords(maplist[i], ST_SEP)
+		local mapRecords = GetMapRecords(maplist[i], ST_SEP)
 
 		for mode, records in pairs(mapRecords) do
 			scores[mode] = $ or {}
 
-			rivalScore = nil
-			yourScore = nil
+			local yourScore, rivalScore
 
 			for _, score in ipairs(records) do
-				if score.name == player.name then
-					yourScore = score
-				elseif score.name == rival then
-					rivalScore = score
-				end
-
-				if rivalScore and yourScore then
-					break
+				for _, p in ipairs(score.players) do
+					if p.name == player.name then
+						yourScore = score
+					elseif p.name == rival then
+						rivalScore = score
+					end
+					if rivalScore and yourScore then
+						break
+					end
 				end
 			end
 
@@ -674,114 +648,93 @@ local function findRival(player, ...)
 
 			local modestr = modeToString(score["rival"]["flags"])
 
+			local diff, color
 			if score["your"] then
-				local diff = score["your"]["time"] - score["rival"]["time"]
-				local color = colors[clamp(-1, diff, 1)]
-
-				CONS_Printf(
-					player,
-					string.format(
-						"%s	%8s	%s%9s	\x80%s",
-						G_BuildMapName(score.rival.map),
-						ticsToTime(score.rival.time),
-						color,
-						sym[diff<0] + ticsToTime(abs(diff)),
-						modestr
-					)
-				)
-			else
-				CONS_Printf(
-					player,
-					string.format(
-						"%s	%8s	%9s	%s",
-						G_BuildMapName(score.rival.map),
-						ticsToTime(score.rival.time),
-						ticsToTime(0, true),
-						modestr
-					)
-				)
+				diff = score["your"]["time"] - score["rival"]["time"]
+				color = colors[clamp(-1, diff, 1)]
 			end
+
+			print(string.format(
+				"%s\t%s\t%s%8s\t\x80%s",
+				G_BuildMapName(score.rival.map),
+				ticsToTime(score.rival.time),
+				color or "",
+				diff ~= nil and sym[diff<0] + ticsToTime(abs(diff)) or ticsToTime(0, true),
+				modestr
+			))
 		end
 	end
 
-	CONS_Printf(
-		player,
-		string.format(
-			"Your score = %s%s%s",
-			colors[clamp(-1, totalDiff, 1)],
-			sym[totalDiff<0],
-			ticsToTime(abs(totalDiff))
-		)
-	)
+	print(string.format(
+		"Your score = %s%s%s",
+		colors[clamp(-1, totalDiff, 1)],
+		sym[totalDiff<0],
+		ticsToTime(abs(totalDiff))
+	))
 
-	CONS_Printf(
-		player,
-		string.format(
-			"Page %d out of %d",
-			page + 1,
-			totalScores / stop + 1
-		)
-	)
-end
-COM_AddCommand("rival", findRival)
+	print(string.format(
+		"Page %d out of %d",
+		page + 1,
+		totalScores / stop + 1
+	))
+end, COM_LOCAL)
 
-local function moveRecords(player, from_map, from_checksum, to_map, to_checksum)
-	if not(from_map and from_checksum and to_map) then
-		CONS_Printf(player, "Usage: lb_move_records <from_map> <from_checksum> <to_map> [<to_checksum>]")
-		CONS_Printf(
-			player,
-			string.format(
-				"Summary: Move records from one map to another.\n"..
-				"If no <to_checksum> is supplied then the checksum of the current loaded map %s is used.\n"..
-				"Hint: Use lb_known_maps to find checksums",
-				to_map or "<to_map>"
-			)
+COM_AddCommand("lb_move_records", function(player, from, to)
+	if not (from and to) then
+		CONS_Printf(player,
+			"\x82Usage:\x80 lb_move_records <from> <to>\n"..
+			"\x82Summary:\x80 Move records from one map to another.\n"..
+			"If no checksum is supplied for <to>, the loaded map's checksum is used.\n"..
+			"To\x85 DELETE\x80 records, write /dev/null in <to>.\n"..
+			"\x82Hint:\x80 Use lb_known_maps to find checksums"
 		)
 		return
 	end
 
-	local from = {
-		["id"] = mapnumFromExtended(from_map),
-		["checksum"] = from_checksum:lower()
-	}
+	local sourcemap, sourcesum = mapnumFromExtended(from)
+	local targetmap, targetsum = mapnumFromExtended(to)
 
-	local to = {
-		["id"] = mapnumFromExtended(to_map),
-	}
-	to.checksum = to_checksum or mapChecksum(to.id)
+	if to == "/dev/null" then
+		targetmap = -1
+	end
 
-	if not to.checksum then
-		CONS_Printf(player, string.format("error: %s is not loaded; provide to_checksum to continue", to_map:upper()))
+	if not sourcemap then
+		CONS_Printf(player, string.format("error: invalid map %s", from:upper()))
 		return
 	end
-	if #to.checksum != 4 or to.checksum:match("[^a-f0-9]") then
-		CONS_Printf(player, string.format("error: %s is an invalid checksum; checksums are of length 4 and can contain only 0-9a-f", to.checksum))
+	if not targetmap then
+		CONS_Printf(player, string.format("error: invalid map %s", to:upper()))
 		return
 	end
 
-	to.checksum = $:lower()
-
-	local mapRecords = GetMapRecords(from.id, F_SPBATK | F_COMBI | F_SPBBIG | F_SPBEXP)
-	local recordCount = 0
-	for mode, records in pairs(mapRecords) do
-		recordCount = $ + #records
+	if not sourcesum then
+		CONS_Printf(player, string.format("error: %s checksum for %s", sourcesum == false and "invalid" or "missing", from:upper()))
+		return
 	end
 
-	MoveRecords(from, to, ST_SEP)
+	if targetmap ~= -1 then
+		if targetsum == nil then targetsum = mapChecksum(targetmap) end
+		if targetsum == false then
+			CONS_Printf(player, string.format("error: invalid checksum for %s", to:upper()))
+			return
+		elseif not targetsum then
+			CONS_Printf(player, string.format("error: %s is not loaded; provide checksum to continue", to:upper()))
+			return
+		end
+	end
+
+	local recordCount = MoveRecords(sourcemap, sourcesum, targetmap, targetsum, ST_SEP)
 
 	CONS_Printf(
 		player,
 		string.format(
-			"%d records have been moved from\x82 %s %s\x80 to\x88 %s %s",
+			"%d records have been moved from\x82 %s\x80 to\x88 %s",
 			recordCount,
-			from_map, from.checksum,
-			to_map, to.checksum
+			from,
+			to
 		)
 	)
-
-	CONS_Printf(player, "Please repack coldstore and restart the server for changes to take effect.")
-end
-COM_AddCommand("lb_move_records", moveRecords, COM_ADMIN)
+end, COM_ADMIN)
 
 addHook("MapLoad", function()
 	TimeFinished = 0
@@ -1399,8 +1352,8 @@ local function saveTime(player)
 end
 
 -- DEBUGGING
-local function saveLeaderboard(player, ...)
-	TimeFinished = tonumber(... or player.realtime)
+local function saveLeaderboard(player, time)
+	TimeFinished = tonumber(time or player.realtime)
 	splits = {1000, 2000, 3000}
 	saveTime(player)
 end
