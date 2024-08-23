@@ -71,8 +71,8 @@ end)
 
 local function djb2(message)
 	local digest = 5381
-	for c in message:gmatch(".") do
-		digest = (($ << 5) + $) + string.byte(c)
+	for i = 1, #message do
+		digest = ($ * 33) + message:byte(i)
 	end
 
 	return digest
@@ -85,8 +85,8 @@ rawset(_G, "lb_map_checksum", function(mapnum)
 		return nil
 	end
 
-	local digest = string.format("%04x", djb2(mh.lvlttl..mh.subttl..mh.zonttl))
-	return string.sub(digest, #digest - 3)
+	local digest = string.format("%04x", djb2(mh.lvlttl..mh.subttl..mh.zonttl) & 0xFFFF)
+	return digest
 end)
 
 rawset(_G, "lb_mapnum_from_extended", function(map)

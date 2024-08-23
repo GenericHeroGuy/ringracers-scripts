@@ -16,7 +16,7 @@ local StringWriter = lb_string_writer
 ----------------------------
 
 local LEADERBOARD_FILE = "leaderboard.sav2"
-local LEADERBOARD_FILE_OLD = "leaderboard.txt"
+local LEADERBOARD_FILE_OLD = "leaderboard.coldstore.txt"
 local COLDSTORE_FILE = "leaderboard.coldstore.sav2"
 local LEADERBOARD_VERSION = 1
 local INDEX_VERSION = 1
@@ -118,61 +118,65 @@ local function read_segmented(filename)
 	return #data and StringReader(data) or nil
 end
 
-local function writeMapStore(mapnum, records, withghosts)
+local function writeRecord(f, record, withghosts)
+	f:writenum(record.id)
+	f:writenum(record.flags)
+	f:writenum(record.time)
+	f:write8(#record.splits)
+	for _, v in ipairs(record.splits) do
+		f:writenum(v)
+	end
+	f:write8(#record.players)
+	for _, p in ipairs(record.players) do
+		f:writestr(p.name)
+		f:writestr(p.skin)
+		f:write8(p.color)
+		f:write8(p.stat)
+		f:writelstr(withghosts and p.ghost or "")
+	end
+end
+
+local function writeMapStore(mapnum, checksums)
 	local f = StringWriter()
 	f:writeliteral("LEADERBOARD")
 	f:write8(LEADERBOARD_VERSION)
-	f:write16(tonumber(mapChecksum(mapnum) or "0", 16))
-	f:writenum(#records)
-	for _, record in ipairs(records) do
-		f:writenum(record.id)
-		f:writenum(record.flags)
-		f:writenum(record.time)
-		f:write8(#record.splits)
-		for _, v in ipairs(record.splits) do
-			f:writenum(v)
-		end
-		f:write8(#record.players)
-		for _, p in ipairs(record.players) do
-			f:writestr(p.name)
-			f:writestr(p.skin)
-			f:write8(p.color)
-			f:write8(p.stat)
-			f:writelstr(withghosts and p.ghost or "")
+
+	local numchecksums = 0
+	for _ in pairs(checksums) do
+		numchecksums = $ + 1
+	end
+	f:writenum(numchecksums)
+	for checksum, records in pairs(checksums) do
+		f:writestr(checksum)
+		f:writenum(#records)
+		for _, record in ipairs(records) do
+			writeRecord(f, record, true)
 		end
 	end
-	if not next(records) then
-		f = {}
-	end
-	return string.format("%s/%s.sav2", cv_directory.string, G_BuildMapName(mapnum)), table.concat(f)
+
+	if not next(checksums) then f = {} end
+	write_segmented(string.format("%s/%s.sav2", cv_directory.string, G_BuildMapName(mapnum)), table.concat(f))
 end
 rawset(_G, "lb_write_map_store", function(map)
-	write_segmented(writeMapStore(map, LiveStore[map], true))
+	writeMapStore(map, LiveStore[map])
 end)
 
 local function writeColdStore(store)
 	local f = StringWriter()
 	f:writeliteral("COLDSTORE")
 	f:writestr(cv_directory.string)
-	for map, records in pairs(store) do
+	for map, checksums in pairs(LiveStore) do
 		f:writenum(map)
-		f:write16(tonumber(mapChecksum(map) or "0", 16))
-		f:writenum(#records)
-		for _, record in ipairs(records) do
-			f:writenum(record.id)
-			f:writenum(record.flags)
-			f:writenum(record.time)
-			f:write8(#record.splits)
-			for _, v in ipairs(record.splits) do
-				f:writenum(v)
-			end
-			f:write8(#record.players)
-			for _, p in ipairs(record.players) do
-				f:writestr(p.name)
-				f:writestr(p.skin)
-				f:write8(p.color)
-				f:write8(p.stat)
-				f:writelstr("")
+		local numchecksums = 0
+		for _ in pairs(checksums) do
+			numchecksums = $ + 1
+		end
+		f:writenum(numchecksums)
+		for checksum, records in pairs(checksums)
+			f:writestr(checksum)
+			f:writenum(#records)
+			for _, record in ipairs(records) do
+				writeRecord(f, record, false)
 			end
 		end
 	end
@@ -183,30 +187,24 @@ local function writeIndex()
 	local f = StringWriter()
 	f:write8(INDEX_VERSION)
 	f:writenum(NextID)
-	for v in pairs(Dirty) do
-		f:writenum(v)
+
+	for mapid, checksums in pairs(LiveStore) do
+		if next(checksums) then f:writenum(mapid) end
 	end
+	f:writenum(0)
+
+	for id in pairs(Dirty) do
+		f:writenum(id)
+	end
+
 	local out = io.open(string.format("%s/%s.sav2", cv_directory.string, "index"), "wb")
 	out:write(table.concat(f))
 	out:close()
 end
 
-local function loadIndex()
-	local f = StringReader(io.open(string.format("%s/%s.sav2", cv_directory.string, "index"), "rb"))
-	if f:read8() > INDEX_VERSION then
-		error("Failed to load index (too new)", 2)
-	end
-	NextID = f:readnum()
-	Dirty = {}
-	print("Loading index")
-	while not f:empty() do
-		Dirty[f:readnum()] = true
-	end
-end
-
 local function dumpStoreToFile(lbname, store)
-	for mapid, records in pairs(store) do
-		write_segmented(writeMapStore(mapid, records, true))
+	for mapid, checksums in pairs(store) do
+		writeMapStore(mapid, checksums)
 	end
 	writeIndex()
 end
@@ -226,55 +224,63 @@ end
 local function mergeStore(other, iscold, deletelist)
 	-- first, get the IDs of all records in here
 	local my_mapforid = {}
-	for map, records in pairs(LiveStore) do
-		for i, record in ipairs(records) do
-			my_mapforid[record.id] = { map = map, rec = record, i = i }
+	for map, checksums in pairs(LiveStore) do
+		for checksum, records in pairs(checksums)
+			for i, record in ipairs(records) do
+				my_mapforid[record.id] = { map = map, rec = record, checksum = checksum, i = i }
+			end
 		end
 	end
 
 	local other_mapforid = {}
-	for map, records in pairs(other) do
-		for i, record in ipairs(records) do
-			other_mapforid[record.id] = { map = map, rec = record, i = i }
+	for map, checksums in pairs(other) do
+		for checksum, records in pairs(checksums) do
+			for i, record in ipairs(records) do
+				other_mapforid[record.id] = { map = map, rec = record, checksum = checksum, i = i }
+			end
 		end
 	end
 
 	-- check the ids of the other store's records to see if anything moved
-	for id in pairs(other_mapforid) do
-		if my_mapforid[id] and my_mapforid[id].map ~= other_mapforid[id].map then
+	for id, ot in pairs(other_mapforid) do
+		local my = my_mapforid[id]
+		if my and my.map ~= ot.map then
 			-- move
-			LiveStore[other_mapforid[id].map] = $ or {}
-			table.insert(LiveStore[other_mapforid[id].map], other_mapforid[id].rec)
-			LiveStore[my_mapforid[id].map][my_mapforid[id].i] = false
-			print(string.format("move %d %d", other_mapforid[id].map, id))
-		elseif my_mapforid[id] then
-			if iscold or recordsIdentical(my_mapforid[id].rec, other_mapforid[id].rec) then
+			LiveStore[ot.map] = $ or {}
+			LiveStore[ot.map][ot.checksum] = $ or {}
+			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
+			LiveStore[my.map][my.checksum][my.i] = false
+			print(string.format("move %d %d", ot.map, id))
+		elseif my then
+			if iscold or recordsIdentical(my.rec, ot.rec) then
 				-- passthrough
-				print(string.format("passthrough %d %d", my_mapforid[id].map, id))
+				print(string.format("passthrough %d %d", my.map, id))
 			else
 				-- overwrite (this wipes the ghost, other rec has empty ghost)
-				LiveStore[my_mapforid[id].map][my_mapforid[id].i] = other_mapforid[id].rec
-				print(string.format("overwrite %d %d", my_mapforid[id].map, id))
+				LiveStore[my.map][my.checksum][my.i] = ot.rec
+				print(string.format("overwrite %d %d", my.map, id))
 			end
 		elseif not Dirty[id] then
 			-- add
-			LiveStore[other_mapforid[id].map] = $ or {}
-			table.insert(LiveStore[other_mapforid[id].map], other_mapforid[id].rec)
-			print(string.format("add %d %d", other_mapforid[id].map, id))
+			LiveStore[ot.map] = $ or {}
+			LiveStore[ot.map][ot.checksum] = $ or {}
+			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
+			print(string.format("add %d %d", ot.map, id))
 		else
 			-- if it's not in livestore and is in coldstore, but it's marked dirty, then it's a deleted cold record
-			print(string.format("ignoring %d %d", other_mapforid[id].map, id))
+			print(string.format("ignoring %d %d", ot.map, id))
 		end
 	end
 
 	-- check for records that exist in our store but not the other, and delete them
 	-- (unless they're dirty. don't wipe new records when the server shuts down)
-	for id in pairs(my_mapforid) do
-		if (iscold and not (other_mapforid[id] or Dirty[id])) or (deletelist and deletelist[id]) then
+	for id, my in pairs(my_mapforid) do
+		local ot = other_mapforid[id]
+		if (iscold and not (ot or Dirty[id])) or (deletelist and deletelist[id]) then
 			-- delete
-			LiveStore[my_mapforid[id].map][my_mapforid[id].i] = false
-			print(string.format("delete %d %d", my_mapforid[id].map, id))
-			if not other_mapforid[id] then
+			LiveStore[my.map][my.checksum][my.i] = false
+			print(string.format("delete %d %d", my.map, id))
+			if not ot then
 				print("not in other")
 			end
 			if not Dirty[id] then
@@ -287,23 +293,29 @@ local function mergeStore(other, iscold, deletelist)
 	end
 
 	-- now delete the gaps (dear god...)
-	for map, records in pairs(LiveStore) do
-		for i = #records, 1, -1 do
-			if records[i] == false then
-				table.remove(records, i)
+	for map, checksums in pairs(LiveStore) do
+		for checksum, records in pairs(checksums) do
+			for i = #records, 1, -1 do
+				if records[i] == false then
+					table.remove(records, i)
+				end
+			end
+			if not next(records) then
+				checksums[checksum] = nil
 			end
 		end
 	end
 
 	-- hopefully this gets rewritten soon
+	-- G from future: this is probably as good as it gets
 end
 
 -- GLOBAL
 -- Returns a list of all maps with records
 local function MapList()
 	local maplist = {}
-	for mapid, records in pairs(LiveStore) do
-		if next(records) then
+	for mapid, checksums in pairs(LiveStore) do
+		if next(checksums) then
 			table.insert(maplist, mapid)
 		end
 	end
@@ -313,48 +325,23 @@ local function MapList()
 end
 rawset(_G, "lb_map_list", MapList)
 
--- Insert mode separated records from the flat sourceTable into dest
-local function insertRecords(dest, sourceTable, modeSep)
-	if not sourceTable then return end
-
-	local mode = nil
-	for _, record in ipairs(sourceTable) do
-		mode = record.flags & modeSep
-		dest[mode] = $ or {}
-		table.insert(dest[mode], record)
-	end
-end
-
 -- GLOBAL
 -- Construct the leaderboard table of the supplied mapid
--- combines the ColdStore and LiveStore records
 local function GetMapRecords(map, modeSep)
 	local mapRecords = {}
 
-	-- Insert LiveStore records
-	insertRecords(mapRecords, LiveStore[map], modeSep)
+	local store = LiveStore[map] and LiveStore[map][mapChecksum(map)]
+	if not store then return mapRecords end
+
+	for _, record in ipairs(store) do
+		local mode = record.flags & modeSep
+		mapRecords[mode] = $ or {}
+		table.insert(mapRecords[mode], record)
+	end
 
 	-- Sort records
 	for _, records in pairs(mapRecords) do
 		table.sort(records, lbComp)
-	end
-
-	-- Remove duplicate entries
-	for _, records in pairs(mapRecords) do
-		local seen = {}
-		local i = 1
-		while i <= #records do
-			local namestr = ""
-			for _, p in ipairs(records[i].players) do
-				namestr = $..p.name.."\x00" -- need a separator to avoid wacky stuff
-			end
-			if seen[namestr] then
-				table.remove(records, i)
-			else
-				seen[namestr] = true
-				i = i + 1
-			end
-		end
 	end
 
 	return mapRecords
@@ -366,7 +353,9 @@ rawset(_G, "lb_get_map_records", GetMapRecords)
 -- SaveRecord will replace the record holders previous record
 local function SaveRecord(score, map, modeSep)
 	LiveStore[map] = $ or {}
-	local inserted = insertOrReplace(LiveStore[map], score, modeSep)
+	LiveStore[map][mapChecksum(map)] = $ or {}
+	local store = LiveStore[map][mapChecksum(map)]
+	local inserted = insertOrReplace(store, score, modeSep)
 	if inserted then
 		score.id = NextID
 		NextID = $ + 1
@@ -375,7 +364,7 @@ local function SaveRecord(score, map, modeSep)
 
 	print("Saving score"..(inserted and " ("..score.id..")" or ""))
 	if isserver then
-		write_segmented(writeMapStore(map, LiveStore[map], true))
+		writeMapStore(map, LiveStore[map])
 		writeIndex()
 	end
 end
@@ -410,7 +399,9 @@ local function oldParseScore(str)
 		end
 	end
 
-	--local checksum = t[9] or ""
+	local checksum = t[9] or ""
+	-- thanks windows
+	checksum = $:sub(1, 4)
 
 	return score_t(
 		tonumber(t[1]), -- Map
@@ -423,28 +414,12 @@ local function oldParseScore(str)
 				t[3], -- Skin
 				tonumber(t[4]), -- Color
 				stats,
-				string.rep("balls", 10000)
+				""
 			)
 		}
-	)
+	), checksum
 end
 rawset(_G, "lb_parse_score", oldParseScore)
-
-local function convertToBinary(f)
-	print("Converting "..LEADERBOARD_FILE_OLD.." to binary")
-	local output = {}
-	local store = {}
-	NextID = 1
-	for l in f:lines() do
-		local score = oldParseScore(l)
-		score.id = NextID
-		store[score.map] = $ or {}
-		table.insert(store[score.map], score)
-		NextID = $ + 1
-	end
-	Dirty = {}
-	dumpStoreToFile(LEADERBOARD_FILE, store)
-end
 
 local function parseScoreBinary(f, map)
 	local id = f:readnum()
@@ -489,12 +464,16 @@ local function loadStore(f, filename, map)
 		error(string.format("Failed to read %s: version %d not supported (highest is %d)", filename, version, LEADERBOARD_VERSION), 2)
 	end
 
-	local checksum = f:read16()
-	local numrecords = f:readnum()
-	for i = 1, numrecords do
-		local score = parseScoreBinary(f, map)
-		if score then
-			table.insert(store, score)
+	local numchecksums = f:readnum()
+	for i = 1, numchecksums do
+		local checksum = f:readstr()
+		local numrecords = f:readnum()
+		store[checksum] = {}
+		for j = 1, numrecords do
+			local score = parseScoreBinary(f, map)
+			if score then
+				table.insert(store[checksum], score)
+			end
 		end
 	end
 
@@ -511,13 +490,17 @@ local function loadColdStore(f)
 
 	while not f:empty() do
 		local mapnum = f:readnum()
-		local checksum = f:read16()
-		local numrecords = f:readnum()
-		for i = 1, numrecords do
-			local score = parseScoreBinary(f, mapnum)
-			if score then
-				store[mapnum] = $ or {}
-				table.insert(store[mapnum], score)
+		local numchecksums = f:readnum()
+		store[mapnum] = {}
+		for i = 1, numchecksums do
+			local checksum = f:readstr()
+			local numrecords = f:readnum()
+			store[mapnum][checksum] = {}
+			for j = 1, numrecords do
+				local score = parseScoreBinary(f, mapnum)
+				if score then
+					table.insert(store[mapnum][checksum], score)
+				end
 			end
 		end
 	end
@@ -527,20 +510,35 @@ end
 
 -- Read and parse a store file
 local function loadStoreFile()
+	local index = StringReader(io.open(string.format("%s/%s.sav2", cv_directory.string, "index"), "rb"))
+	if index:read8() > INDEX_VERSION then
+		error("Failed to load index (too new)", 2)
+	end
+	NextID = index:readnum()
+
 	local store = {}
-	for i = 1, #mapheaderinfo do
-		local filename = string.format("%s/%s.sav2", cv_directory.string, G_BuildMapName(i))
+	while true do
+		local mapid = index:readnum()
+		if not mapid then break end
+		print(G_BuildMapName(mapid))
+		local filename = string.format("%s/%s.sav2", cv_directory.string, G_BuildMapName(mapid))
 		local f = read_segmented(filename)
 		if f then
-			store[i] = loadStore(f, filename, i)
+			store[mapid] = loadStore(f, filename, mapid)
+		else
+			print("file missing???")
 		end
 	end
-	loadIndex()
+
+	Dirty = {}
+	while not index:empty() do
+		Dirty[index:readnum()] = true
+	end
+
 	return store
 end
 
 local function AddColdStoreBinary(str)
-	loadIndex()
 	local f = StringReader(lb_base128_decode(str))
 	local store = loadColdStore(f)
 	mergeStore(store, true)
@@ -589,15 +587,18 @@ local function netvars(net)
 		local send = {}
 		local highest = 0
 		local byid = {}
-		for map, records in pairs(LiveStore) do
+		for map, checksums in pairs(LiveStore) do
 			send[map] = {}
-			for _, record in ipairs(records) do
-				if Dirty[record.id] then
-					table.insert(send[map], record)
-					print(record.id)
+			for checksum, records in pairs(checksums) do
+				send[map][checksum] = {}
+				for _, record in ipairs(records) do
+					if Dirty[record.id] then
+						table.insert(send[map][checksum], record)
+						print(record.id)
+					end
+					byid[record.id] = record
+					highest = max($, record.id)
 				end
-				byid[record.id] = record
-				highest = max($, record.id)
 			end
 		end
 		-- need this in case the very latest records are deleted
@@ -639,10 +640,13 @@ COM_AddCommand("lb_write_coldstore", function(player, filename)
 	end
 
 	local store = {}
-	for map, records in pairs(LiveStore) do
+	for map, checksums in pairs(LiveStore) do
 		store[map] = $ or {}
-		for _, record in ipairs(records) do
-			insertOrReplace(store[map], record, -1)
+		for checksum, records in pairs(checksums) do
+			store[map][checksum] = {}
+			for _, record in ipairs(records) do
+				insertOrReplace(store[map][checksum], record, -1)
+			end
 		end
 	end
 
@@ -661,7 +665,7 @@ COM_AddCommand("lb_write_coldstore", function(player, filename)
 	writeIndex()
 end, COM_LOCAL)
 
-COM_AddCommand("lb_list_records", function(player, map)
+COM_AddCommand("lb_known_maps", function(player, map)
 	local mapnum = gamemap
 	if map then
 		mapnum = mapnumFromExtended(map)
@@ -671,18 +675,17 @@ COM_AddCommand("lb_list_records", function(player, map)
 		end
 	end
 
-	if not LiveStore[mapnum] then
-		print(string.format("%s has no records", G_BuildMapName(mapnum)))
-		return
+	local known = {}
+
+	if LiveStore[mapnum] then
+		for checksum, records in pairs(LiveStore[mapnum]) do
+			known[checksum] = #records
+		end
 	end
 
-	print(string.format("Records for %s:", G_BuildMapName(mapnum)))
-	for _, record in ipairs(LiveStore[mapnum]) do
-		local namestr = ""
-		for _, p in ipairs(record.players) do
-			namestr = $..string.format("%s%s ", SG_Color2Chat and SG_Color2Chat[p.color] or "", p.name)
-		end
-		print(string.format("%7d %s %s", record.id, ticsToTime(record.time, true), namestr))
+	print("Map	Chck	Records")
+	for checksum, count in pairs(known) do
+		print(string.format("%s	%s	%d", G_BuildMapName(mapnum), checksum, count))
 	end
 end, COM_LOCAL)
 
@@ -698,30 +701,50 @@ COM_AddCommand("lb_download_live_records", function(player, filename)
 	dumpStoreToFile(filename, LiveStore)
 end, COM_LOCAL)
 
-COM_AddCommand("lb_convert_to_binary", function()
-	local f = io.open(LEADERBOARD_FILE_OLD)
-	convertToBinary(f)
-	if f then f:close() end
+COM_AddCommand("lb_convert_to_binary", function(player, filename)
+	filename = $ or LEADERBOARD_FILE_OLD
+	local f = io.open(filename)
+	if not f then
+		print("Can't open "..filename)
+		return
+	end
+	print("Converting "..filename.." to binary")
+	LiveStore = {}
+	NextID = 1
+	for l in f:lines() do
+		local score, checksum = oldParseScore(l)
+		score.id = NextID
+		LiveStore[score.map] = $ or {}
+		LiveStore[score.map][checksum] = $ or {}
+		table.insert(LiveStore[score.map][checksum], score)
+		NextID = $ + 1
+	end
+	f:close()
+	Dirty = {}
+
+	dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
 end, COM_LOCAL)
 
 COM_AddCommand("lb_wipe_records", function()
 	local map = gamemap
-	for i, record in ipairs(LiveStore[map]) do
-		LiveStore[map][i] = nil
+	for i, record in ipairs(LiveStore[map][mapChecksum(map)]) do
+		LiveStore[map][mapChecksum(map)][i] = nil
 		Dirty[record.id] = true
 	end
+	LiveStore[map][mapChecksum(map)] = nil
 	dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
 end, COM_LOCAL)
 
 -- very ugly test command
 COM_AddCommand("lb_move", function()
-	local test = LiveStore[1][1]
-	LiveStore[1][1] = nil
-	LiveStore[2] = { test }
+	local test = LiveStore[1][mapChecksum(1)][1]
+	LiveStore[1][mapChecksum(1)][1] = nil
+	LiveStore[2] = {}
+	LiveStore[2][mapChecksum(2)] = { test }
 	test.map = 2
 	Dirty[test.id] = true
-	write_segmented(writeMapStore(1, LiveStore[1], true))
-	write_segmented(writeMapStore(2, LiveStore[2], true))
+	writeMapStore(1, LiveStore[1])
+	writeMapStore(2, LiveStore[2])
 	writeIndex()
 end, COM_LOCAL)
 

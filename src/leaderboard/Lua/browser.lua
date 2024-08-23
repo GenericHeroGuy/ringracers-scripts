@@ -196,7 +196,7 @@ end
 local F_SPBATK = lb_flag_spbatk
 local F_SPBJUS = lb_flag_spbjus
 local F_SPBBIG = lb_flag_spbbig
-local F_SPBEXP = lb_flag_sbpexp
+local F_SPBEXP = lb_flag_spbexp
 local F_COMBI = lb_flag_combi
 local F_ENCORE = lb_flag_encore
 
