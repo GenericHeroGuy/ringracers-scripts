@@ -4,6 +4,7 @@
 
 -- lb_common.lua
 local StringReader = lb_string_reader
+local StringWriter = lb_string_writer
 
 -----------------------------
 
@@ -291,8 +292,11 @@ local recorders = {}
 
 -- start recording ghost data for player
 local function StartRecording(player)
+	local writer = StringWriter()
+	writer:writenum(leveltime) -- startofs
+
 	recorders[player] = {
-		data = "",
+		data = table.concat(writer),
 		lastsneaker = 0,
 		lastspark = 0,
 
@@ -322,6 +326,12 @@ local function StopRecording(player)
 end
 rawset(_G, "lb_ghost_stop_recording", StopRecording)
 
+-- returns true if a ghost is being recorded for the player
+local function IsRecording(player)
+	return recorders[player] ~= nil
+end
+rawset(_G, "lb_ghost_is_recording", IsRecording)
+
 addHook("MapChange", function()
 	recorders = {}
 end)
@@ -329,7 +339,7 @@ end)
 addHook("ThinkFrame", function()
 	if not leveltime then return end
 	for player, g in pairs(recorders) do
-		if player.spectator then StopRecording(player); continue end
+		if not player.valid or player.spectator then StopRecording(player); continue end
 
 		-- hoooly fuck this is stupid
 		-- but after hours and hours of trying random shit until something worked, this is what worked
@@ -393,14 +403,16 @@ local function PlayGhost(record)
 	local ghosts = {}
 	for i, recplayer in ipairs(record.players) do
 		local mo = SpawnLocal(0, 0, 0, MT_THOK)
-		mo.flags = MF_NOTHINK|MF_NOBLOCKMAP|MF_NOGRAVITY|MF_NOCLIP|MF_NOCLIPTHING|MF_NOCLIPHEIGHT|MF_DONTENCOREMAP
+		mo.flags = MF_NOTHINK|MF_NOSECTOR|MF_NOBLOCKMAP|MF_NOGRAVITY|MF_NOCLIP|MF_NOCLIPTHING|MF_NOCLIPHEIGHT|MF_DONTENCOREMAP
 		mo.sprite = SPR_PLAY
 		mo.skin = recplayer.skin
 		mo.color = recplayer.color
 
+		local reader = StringReader(recplayer.ghost)
 		local ghost = setmetatable({
-			file = StringReader(recplayer.ghost),
+			file = reader,
 			name = recplayer.name,
+			startofs = reader:readnum(),
 			mo = mo,
 			gmomx = 0,
 			gmomy = 0,
@@ -456,12 +468,18 @@ local function StopWatching()
 end
 
 local function NextWatch()
-	if ghostwatching then
-		ghostwatching = next(replayers, ghostwatching) or next(replayers)
-		if not ghostwatching then StopWatching() end
-	else
-		ghostwatching = next(replayers)
-	end
+	local ghost = ghostwatching
+	local start = ghost
+	repeat
+		if (ghost and not start) or not replayers[ghost] then start = next(replayers) end -- no infinite loops please
+		ghost = next(replayers, ghost) or next(replayers) -- loop de loop
+		if ghost and leveltime >= ghost.startofs then
+			ghostwatching = ghost
+			return
+		end
+	until ghost == ghostwatching or not ghost or ghost == start
+	-- nothing appropriate.
+	ghostwatching = nil
 end
 
 local function StopPlaying(replay)
@@ -576,13 +594,18 @@ addHook("ThinkFrame", function()
 
 	if ghostcustom2 == 1 then
 		if not (ghostcam and ghostcam.valid) then
-			ghostcam = P_SpawnMobj(0, 0, 0, MT_THOK)
+			ghostcam = SpawnLocal(0, 0, 0, MT_THOK)
 			ghostcam.flags = MF_NOTHINK|MF_NOSECTOR|MF_NOBLOCKMAP|MF_NOCLIP|MF_NOCLIPHEIGHT|MF_NOCLIPTHING
 		end
 		NextWatch()
 	end
 
 	for r in pairs(replayers) do
+		if leveltime < r.startofs then
+			continue
+		elseif leveltime == r.startofs + 1 then -- + 1 because if ghost starts on leveltime 0, rec/play hasn't ran yet
+			r.mo.flags = $ & ~MF_NOSECTOR
+		end
 		if not r.file:empty() then
 			local flags
 			repeat -- for all the specials
@@ -776,7 +799,13 @@ hud.add(function(v, p)
 		end
 	end
 
-	if true then return end
+	--[[
+	local i = 0
+	for p in pairs(recorders) do
+		v.drawString(100, 80+i, "Recording "..p.name, 0, "thin")
+		i = i + 8
+	end
+
 	local _, g = next(recorders)
 	if g then
 		v.drawString(240, 32, "FX: "..(g.fakex/FRACUNIT))
@@ -794,4 +823,5 @@ hud.add(function(v, p)
 		local patch = v.cachePatch("BLANKLVL")
 		v.drawOnMinimap(r.mo.x, r.mo.y, FixedDiv(10, patch.height), patch)
 	end
+	--]]
 end)

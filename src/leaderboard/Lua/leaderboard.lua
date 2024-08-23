@@ -29,6 +29,7 @@ local WriteMapStore = lb_write_map_store
 local GhostStartRecording = lb_ghost_start_recording
 local GhostStopRecording = lb_ghost_stop_recording
 local GhostStartPlaying = lb_ghost_start_playing
+local GhostIsRecording = lb_ghost_is_recording
 
 -- lbcomms.lua
 local CommsRequestGhosts = lb_request_ghosts
@@ -293,6 +294,21 @@ local function initLeaderboard(player)
 	end
 
 	player.afkTime = leveltime
+
+	if not (player.spectator or disable) then
+		MapRecords = GetMapRecords(gamemap, ST_SEP)
+	end
+
+	-- if combi is active, disable will be true for the first player but not the second
+	-- so player 2 has to start ghost recording for both players
+	-- bleh
+	for p in players.iterate do
+		if (p.spectator or disable) then
+			if GhostIsRecording(p) then GhostStopRecording(p) end
+		elseif not (p.spectator or GhostIsRecording(p)) then
+			GhostStartRecording(p)
+		end
+	end
 end
 addHook("PlayerSpawn", initLeaderboard)
 
@@ -767,24 +783,6 @@ local function moveRecords(player, from_map, from_checksum, to_map, to_checksum)
 end
 COM_AddCommand("lb_move_records", moveRecords, COM_ADMIN)
 
---DEBUGGING
-local function printTable(tb)
-	for mode, tbl in pairs(tb) do
-		print(string.format("[%d]", mode))
-		for _, v in pairs(tbl) do
-			print(
-				v.players[1].name,
-				v.players[1].skin,
-				v.players[1].color,
-				v["time"],
-				table.concat(v["splits"]),
-				v["flags"],
-				","
-			)
-		end
-	end
-end
-
 addHook("MapLoad", function()
 	TimeFinished = 0
 	splits = {}
@@ -797,14 +795,6 @@ addHook("MapLoad", function()
 	allowJoin(true)
 
 	if disable then return end
-
-	for p in players.iterate do
-		if not p.spectator then GhostStartRecording(p) end
-	end
-
-	MapRecords = GetMapRecords(gamemap, ST_SEP)
-
-	--printTable(MapRecords)
 
 	for mode, records in pairs(MapRecords) do
 		if mode & ST_SEP ~= Flags & ST_SEP then continue end
@@ -927,14 +917,6 @@ end
 
 local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 	textVFlags = textVFlags or V_HUDTRANSHALF
-	local me = true
-	local gamers = getGamers()
-	for i, p in ipairs(score.players) do
-		if gamers[i].name ~= p.name then
-			me = false
-			break
-		end
-	end
 
 	local hudscale = scaleHud(FRACUNIT)
 	local frdim = scaleHud(FACERANK_DIM)
@@ -1071,6 +1053,15 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 		end
 
 		local flashV = 0
+		local me = true
+		local gamers = getGamers()
+		for i, p in ipairs(gamers) do
+			local sp = score.players[i]
+			if sp and p.name ~= sp.name then
+				me = false
+				break
+			end
+		end
 		if me and FlashTics > leveltime then
 			flashV = FlashVFlags[leveltime / FlashRate % (#FlashVFlags + 1)]
 		end
@@ -1328,7 +1319,7 @@ local function checkFlags(p)
 	end
 
 	-- Combi
-	if cv_combiactive and cv_combiactive.value and cv_combiminimumplayers.value >= 2 then
+	if cv_combiactive and cv_combiactive.value and cv_combiminimumplayers.value <= 2 then
 		flags = $ | F_COMBI
 	end
 
@@ -1501,14 +1492,6 @@ local function think()
 
 	local gamers = getGamers()
 
-	if #gamers < ((Flags & F_COMBI) and 2 or 1) then
-		if Flags & F_COMBI then disable = true end -- not taking any risks
-		if cv_teamchange.value == 0 then
-			allowJoin(true)
-		end
-		return
-	end
-
 	hud.disable("minirankings")
 
 	if leveltime < START_TIME then
@@ -1553,6 +1536,12 @@ local function think()
 		else
 			hud.enable("freeplay")
 		end
+	elseif #gamers < ((Flags & F_COMBI) and 2 or 1) then
+		if Flags & F_COMBI then disable = true end -- not taking any risks
+		if cv_teamchange.value == 0 then
+			allowJoin(true)
+		end
+		return
 	end
 
 	ScoreTable = MapRecords[ST_SEP & Flags]
@@ -1631,14 +1620,23 @@ local function think()
 end
 addHook("ThinkFrame", think)
 
--- sneakers only, for combi
--- do this in playerthink to get rid of items as soon as possible
+-- WELCOME BACK NEOROULETTE
+-- combi is strictly sneakers only... from item boxes
+local preroulette
+addHook("PreThinkFrame", function()
+	if not disable then
+		for p in players.iterate do
+			preroulette[p] = p.kartstuff[k_itemroulette]
+		end
+	end
+end)
 addHook("PlayerThink", function(p)
-	if not disable and p.kartstuff[k_itemamount] then
+	if not disable and preroulette[p] and not p.kartstuff[k_itemroulette] and not p.kartstuff[k_eggmanexplode] then
 		p.kartstuff[k_itemtype] = KITEM_SNEAKER
 		p.kartstuff[k_itemamount] = 1
 	end
 end)
+addHook("MapChange", function() preroulette = {} end)
 
 local function interThink()
 	if nextMap then changeMap() end
@@ -1681,5 +1679,6 @@ local function netvars(net)
 	TimeFinished = net($)
 	clearcheats = net($)
 	BrowserPlayer = net($)
+	preroulette = net($)
 end
 addHook("NetVars", netvars)

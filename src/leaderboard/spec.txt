@@ -47,6 +47,10 @@ string DIRNAME // lb_store_directory
 
 Binary ghost data spec
 
+// ghost header
+num STARTOFS // leveltime when ghost starts
+
+// repeat until end of file
 byte FLAGS
 // b0-3: "fake" mobj frame (basically divided by 2, see below)
 // b4: XY present
