@@ -15,6 +15,9 @@ local StringWriter = lb_string_writer
 
 ----------------------------
 
+local RINGS = VERSION == 2
+local open = RINGS and io.openlocal or io.open
+
 local LEADERBOARD_FILE = "leaderboard.sav2"
 local LEADERBOARD_FILE_OLD = "leaderboard.coldstore.txt"
 local COLDSTORE_FILE = "leaderboard.coldstore.sav2"
@@ -84,7 +87,7 @@ local function write_segmented(filename, data)
 	local fnum = 0
 	for i = 1, #data, 1048576 do
 		local out = assert(
-			io.open(postfix(filename, "_"..fnum), "wb"),
+			open(postfix(filename, "_"..fnum), "wb"),
 			"Failed to open file for writing: "..filename
 		)
 		out:write(data:sub(i, i+1048575))
@@ -92,10 +95,10 @@ local function write_segmented(filename, data)
 		fnum = $ + 1
 	end
 	repeat
-		local old = io.open(postfix(filename, "_"..fnum), "rb")
+		local old = open(postfix(filename, "_"..fnum), "rb")
 		if old then
 			old:close()
-			old = io.open(postfix(filename, "_"..fnum), "wb")
+			old = open(postfix(filename, "_"..fnum), "wb")
 			old:close()
 			fnum = $ + 1
 		end
@@ -106,7 +109,7 @@ local function read_segmented(filename)
 	local fnum = 0
 	local data = {}
 	while true do
-		local f = io.open(postfix(filename, "_"..fnum), "rb")
+		local f = open(postfix(filename, "_"..fnum), "rb")
 		if not (f and f:read(0)) then
 			break
 		end
@@ -197,7 +200,7 @@ local function writeIndex()
 		f:writenum(id)
 	end
 
-	local out = io.open(string.format("%s/%s.sav2", cv_directory.string, "index"), "wb")
+	local out = open(string.format("%s/%s.sav2", cv_directory.string, "index"), "wb")
 	out:write(table.concat(f))
 	out:close()
 end
@@ -510,7 +513,7 @@ end
 
 -- Read and parse a store file
 local function loadStoreFile()
-	local index = StringReader(io.open(string.format("%s/%s.sav2", cv_directory.string, "index"), "rb"))
+	local index = StringReader(open(string.format("%s/%s.sav2", cv_directory.string, "index"), "rb"))
 	if index:read8() > INDEX_VERSION then
 		error("Failed to load index (too new)", 2)
 	end
@@ -652,7 +655,7 @@ COM_AddCommand("lb_write_coldstore", function(player, filename)
 	end
 
 	local dat = writeColdStore(store)
-	local f = io.open(COLDSTORE_FILE, "wb")
+	local f = open(COLDSTORE_FILE, "wb")
 	f:write(dat)
 	f:close()
 
@@ -692,7 +695,7 @@ end, COM_LOCAL)
 
 COM_AddCommand("lb_convert_to_binary", function(player, filename)
 	filename = $ or LEADERBOARD_FILE_OLD
-	local f = io.open(filename)
+	local f = open(filename)
 	if not f then
 		print("Can't open "..filename)
 		return

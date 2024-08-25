@@ -12,6 +12,8 @@ local score_t = lb_score_t
 local player_t = lb_player_t
 local mapnumFromExtended = lb_mapnum_from_extended
 local StringReader = lb_string_reader
+local drawNum = lb_draw_num
+local getThrowDir = lb_throw_dir
 
 -- browser.lua
 local InitBrowser = InitBrowser
@@ -34,6 +36,12 @@ local GhostIsRecording = lb_ghost_is_recording
 -- lbcomms.lua
 local CommsRequestGhosts = lb_request_ghosts
 --------------------------------------------
+
+local RINGS = VERSION == 2
+local TURNING = RINGS and "turning" or "driftturn"
+local RACETOL = RINGS and TOL_RACE or TOL_RACE | TOL_SP
+local BATTLETOL = RINGS and TOL_BATTLE or TOL_MATCH | TOL_COOP
+local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
 
 -- Holds the current maps records table including all modes
 local MapRecords = {}
@@ -234,10 +242,10 @@ function allowJoin(v)
 		local y
 		if v then
 			y = "yes"
-			hud.enable("freeplay")
+			hud.enable(RINGS and "rankings" or "freeplay")
 		else
 			y = "no"
-			hud.disable("freeplay")
+			hud.disable(RINGS and "rankings" or "freeplay")
 		end
 
 		COM_BufInsertText(server, "allowteamchange " + y)
@@ -285,11 +293,11 @@ local function initLeaderboard(player)
 	else
 		disable = disable or not canstart()
 	end
-	disable = $ or not cv_enable.value or not (maptol & (TOL_SP | TOL_RACE))
+	disable = $ or not cv_enable.value or not (maptol & RACETOL)
 
 	-- Restore encore mode to initial value
 	if disable and EncoreInitial != nil then
-		COM_BufInsertText(server, string.format("kartencore %d", EncoreInitial))
+		COM_BufInsertText(server, string.format(RINGS and "encore %d" or "kartencore %d", EncoreInitial))
 		EncoreInitial = nil
 	end
 
@@ -323,7 +331,7 @@ end
 COM_AddCommand("retry", function(player)
 	if doyoudare(player) then
 		-- Verify valid race level
-		if not (mapheaderinfo[gamemap].typeoflevel & (TOL_SP | TOL_RACE)) then
+		if not (mapheaderinfo[gamemap].typeoflevel & RACETOL) then
 			CONS_Printf(player, "Battle maps are not supported")
 			return
 		end
@@ -346,7 +354,7 @@ COM_AddCommand("levelselect", function(player)
 	if not doyoudare(player) then return end
 
 	-- TODO: allow in battle
-	if mapheaderinfo[gamemap].typeoflevel & TOL_MATCH then
+	if mapheaderinfo[gamemap].typeoflevel & BATTLETOL then
 		CONS_Printf(player, "Please exit battle first")
 		return
 	end
@@ -365,7 +373,13 @@ end)
 
 COM_AddCommand("findmap", function(player, search)
 	local hell = "\x85HELL"
-	local tol = {
+	local tol = RINGS and {
+		[TOL_RACE] = "\x88Race\x80",
+		[TOL_BATTLE] = "\x87\Battle\x80",
+		[TOL_SPECIAL] = "\x86Special\x80",
+		[TOL_VERSUS] = "\x85Versus\x80",
+		[TOL_TUTORIAL] = "\x84Tutorial\x80"
+	} or {
 		[TOL_SP] = "\x81Race\x80", -- Nuked race maps
 		[TOL_COOP] = "\x8D\Battle\x80", -- Nuked battle maps
 		[TOL_RACE] = "\x88Race\x80",
@@ -382,23 +396,21 @@ COM_AddCommand("findmap", function(player, search)
 		lvlttl = map.lvlttl + zoneAct(map)
 
 		if not search or lvlttl:lower():find(search:lower()) then
-			-- Only care for up to TOL_MATCH (0x10)
-			lvltype = tol[map.typeoflevel & 0x1F] or map.typeoflevel
+			lvltype = tol[map.typeoflevel] or map.typeoflevel
 
-			-- If not battle print numlaps
-			lvltype = (map.typeoflevel & (TOL_MATCH | TOL_COOP) and lvltype)
+			-- If race print numlaps
+			lvltype = not (map.typeoflevel & RACETOL) and lvltype
 				or string.format("%s \x82%-2d\x80", lvltype, map.numlaps)
 
-
 			print(string.format(
-					"%s%s (#%s) %-9s %-30s - %s\t%s",
-					G_BuildMapName(i),
-					(player == server or IsPlayerAdmin(player)) and "\x86:"..mapChecksum(i).."\x80" or "",
-					i,
-					lvltype,
-					lvlttl,
-					map.subttl,
-					(map.menuflags & LF2_HIDEINMENU and hell) or ""
+				RINGS and "%28s%s%s %-9s %s %s" or "%s%s (#%s) %-9s %-30s - %s\t%s",
+				G_BuildMapName(i),
+				(player == server or IsPlayerAdmin(player)) and "\x86:"..mapChecksum(i).."\x80" or "",
+				RINGS and "" or i,
+				lvltype,
+				lvlttl,
+				RINGS and (map.menuttl ~= "" and "("..map.menuttl..")" or "") or map.subttl,
+				(map.menuflags & LF2_HIDEINMENU and hell) or "" -- not in rings
 			))
 		end
 	end
@@ -443,7 +455,7 @@ COM_AddCommand("records", function(_, mapid)
 	if next(mapRecords) == nil then
 		print(string.format(
 			checksum == false and "Invalid checksum for %s"
-			or "No records found for %s"..(checksum == nil and ", please provide a checksum (hint: lb_known_maps)" or ""),
+			or "No records found for %s"..(not RINGS and checksum == nil and ", please provide a checksum (hint: lb_known_maps)" or ""),
 			mapid or G_BuildMapName()
 		))
 		return
@@ -463,7 +475,7 @@ COM_AddCommand("records", function(_, mapid)
 			string.format("\x83%%%ds%%s\x80 - \x88%%s", #map.lvlttl - #zoneact / 2 - 1),
 			" ",
 			zoneAct(map),
-			map.subttl
+			RINGS and map.menuttl or map.subttl
 		))
 	else
 		print("\x85UNKNOWN MAP")
@@ -518,7 +530,7 @@ COM_AddCommand("changelevel", function(player, map)
 	end
 
 	-- Verify valid race level
-	if not (mapheaderinfo[mapnum].typeoflevel & (TOL_SP | TOL_RACE)) then
+	if not (mapheaderinfo[mapnum].typeoflevel & RACETOL) then
 		CONS_Printf(player, "Battle maps are not supported")
 		return
 	end
@@ -526,20 +538,18 @@ COM_AddCommand("changelevel", function(player, map)
 	nextMap = G_BuildMapName(mapnum)
 end)
 
-COM_AddCommand("encore", function(player)
+COM_AddCommand("lb_encore", function(player)
 	if not doyoudare(player) then
 		return
 	end
 
-	local enc = CV_FindVar("kartencore")
+	local enc = CV_FindVar(RINGS and "encore" or "kartencore")
 	if EncoreInitial == nil then
 		EncoreInitial = enc.value
 	end
 
-	if enc.value then
-		COM_BufInsertText(server, "kartencore off")
-	else
-		COM_BufInsertText(server, "kartencore on")
+	if isserver then
+		CV_Set(enc, (enc.value & 1) ^^ 1) -- Ring Racers uses -1 for "Auto"
 	end
 end)
 
@@ -707,6 +717,9 @@ COM_AddCommand("lb_move_records", function(player, from, to)
 		return
 	end
 
+	if RINGS then
+		sourcesum = mapChecksum(sourcemap)
+	end
 	if not sourcesum then
 		CONS_Printf(player, string.format("error: %s checksum for %s", sourcesum == false and "invalid" or "missing", from:upper()))
 		return
@@ -739,7 +752,7 @@ end, COM_ADMIN)
 addHook("MapLoad", function()
 	TimeFinished = 0
 	splits = {}
-	prevLap = 0
+	prevLap = RINGS and 1 or 0
 	drawState = DS_DEFAULT
 	scrollY = 50 * FRACUNIT
 	scrollAcc = 0
@@ -878,7 +891,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 
 	-- Position
 	if drawPos then
-		v.drawNum(x, y + 3, pos, textVFlags | VFLAGS)
+		drawNum(v, x, y + 3, pos, textVFlags | VFLAGS)
 	end
 
 	--draw Patch/chili
@@ -1034,8 +1047,9 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 		end
 
 		-- Draw splits
-		if showSplit and score["splits"] and score["splits"][prevLap] != nil then
-			local split = splits[prevLap] - score["splits"][prevLap]
+		local prev = prevLap - (RINGS and 1 or 0)
+		if showSplit and score["splits"] and score["splits"][prev] != nil then
+			local split = splits[prev] - score["splits"][prev]
 			v.drawString(
 				x + px + frdim,
 				y + time_yoff,
@@ -1194,8 +1208,8 @@ function cachePatches(v)
 		PATCH["FACERANK"] = {}
 		PATCH["FACEWANT"] = {}
 		for skin in skins.iterate do
-			PATCH["FACERANK"][skin.name] = v.cachePatch(skin.facerank)
-			PATCH["FACEWANT"][skin.name] = v.cachePatch(skin.facewant)
+			PATCH["FACERANK"][skin.name] = RINGS and v.getSprite2Patch(#skin, SPR2_XTRA, A) or v.cachePatch(skin.facerank)
+			PATCH["FACEWANT"][skin.name] = RINGS and v.getSprite2Patch(#skin, SPR2_XTRA, B) or v.cachePatch(skin.facewant)
 		end
 
 		PATCH["SPB"] = v.cachePatch("K_ISSPB")
@@ -1401,7 +1415,7 @@ local function think()
 			if not singleplayer() then
 				for p in players.iterate do
 					if p.valid and not p.spectator and not p.exiting and p.lives > 0 then
-						if p.cmd.buttons or p.cmd.driftturn then
+						if p.cmd.buttons or p.cmd[TURNING] then
 							p.afkTime = max(TICRATE*8, leveltime)
 						end
 
@@ -1501,12 +1515,12 @@ local function think()
 
 	for _, p in ipairs(gamers) do
 		-- must be done before browser control
-		if p.laps >= mapheaderinfo[gamemap].numlaps and TimeFinished == 0 then
+		if p.laps >= mapheaderinfo[gamemap].numlaps + (RINGS and 1 or 0) and TimeFinished == 0 then
 			TimeFinished = p.realtime
 			saveTime(p)
 		end
 
-		if p.cmd.buttons or p.cmd.driftturn then
+		if p.cmd.buttons or p.cmd[TURNING] then
 			p.afkTime = leveltime
 		end
 
@@ -1517,9 +1531,10 @@ local function think()
 	-- Spectators can't input buttons so let the gamer do it
 	if drawState == DS_SCROLL then
 		-- TODO nice port priority
-		if gamers[1].cmd.buttons & BT_BACKWARD then
+		local dir = getThrowDir(gamers[1])
+		if dir == -1 then -- BT_BACKWARD
 			scrollAcc = scrollAcc - FRACUNIT / 3
-		elseif gamers[1].cmd.buttons & BT_FORWARD then
+		elseif dir == 1 then -- BT_FORWARD
 			scrollAcc = scrollAcc + FRACUNIT / 3
 		else
 			scrollAcc = FixedMul(scrollAcc, (FRACUNIT * 90) / 100)
@@ -1576,6 +1591,7 @@ addHook("ThinkFrame", think)
 -- WELCOME BACK NEOROULETTE
 -- combi is strictly sneakers only... from item boxes
 local preroulette
+if not RINGS then
 addHook("PreThinkFrame", function()
 	if not disable then
 		for p in players.iterate do
@@ -1590,6 +1606,7 @@ addHook("PlayerThink", function(p)
 	end
 end)
 addHook("MapChange", function() preroulette = {} end)
+end
 
 local function interThink()
 	if nextMap then changeMap() end

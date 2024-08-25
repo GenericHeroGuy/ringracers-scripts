@@ -1,3 +1,5 @@
+local RINGS = VERSION == 2
+
 rawset(_G, "lb_score_t", function(map, flags, time, splits, players, id)
 	return {
 		["map"]    = map,
@@ -39,7 +41,7 @@ rawset(_G, "lb_ZoneAct", function(map)
 	elseif not(map.levelflags & LF_NOZONE) then
 		z = " Zone"
 	end
-	if map.actnum != "" then
+	if map.actnum ~= (not RINGS and "" or 0) then
 		z = $ + " " + map.actnum
 	end
 
@@ -85,11 +87,21 @@ rawset(_G, "lb_map_checksum", function(mapnum)
 		return nil
 	end
 
-	local digest = string.format("%04x", djb2(mh.lvlttl..mh.subttl..mh.zonttl) & 0xFFFF)
+	local digest = string.format("%04x", djb2(mh.lvlttl..(RINGS and mh.menuttl or mh.subttl)..mh.zonttl) & 0xFFFF)
 	return digest
 end)
 
 rawset(_G, "lb_mapnum_from_extended", function(map)
+	if RINGS then
+		-- how do you convert a map's lumpname back to a number?
+		-- good question...
+		if tonumber(map) then
+			return nil
+		else
+			return G_FindMapByNameOrCode(map), nil
+		end
+	end
+
 	local p, q, checksum = map:upper():match("MAP(%w)(%w):?(.*)$", 1)
 	if not (p and q) then
 		return nil
@@ -124,6 +136,31 @@ rawset(_G, "lb_mapnum_from_extended", function(map)
 	end
 
 	return mapnum, checksum
+end)
+
+-- ...throwdir!? what happened to BT_FORWARD/BT_BACKWARD?
+-- well you might be surprised to learn that throwdir exists in both games :^)
+-- so it's the least troublesome way to get up/down inputs
+rawset(_G, "lb_throw_dir", function(p)
+	if RINGS then
+		return p.throwdir
+	else
+		return p.kartstuff[k_throwdir]
+	end
+end)
+
+
+rawset(_G, "lb_draw_num", function(v, x, y, num, flags)
+	if RINGS then
+		num = tostring($)
+		for i = #num, 1, -1 do
+			local char = v.cachePatch(string.format("MDFN%03d", num:byte(i)))
+			x = $ - char.width
+			v.draw(x, y, char, flags)
+		end
+	else
+		v.drawNum(x, y, num, flags) -- Fun Fact: This function instantly segfaults in Dr. Robotnik's Ring Racers!
+	end
 end)
 
 -- ok, this is a fucking eyesore... but integer keys are faster than string keys

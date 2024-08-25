@@ -5,8 +5,15 @@
 -- lb_common.lua
 local StringReader = lb_string_reader
 local StringWriter = lb_string_writer
+local getThrowDir = lb_throw_dir
 
 -----------------------------
+
+local RINGS = VERSION == 2
+local BT_CUSTOM2 = RINGS and 1<<14 or BT_CUSTOM2
+local TURNING = RINGS and "turning" or "driftturn"
+local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
+local FIRSTRAINBOWCOLOR = SKINCOLOR_PINK
 
 local EXP0 = FRACBITS+12
 local EXP1 = FRACBITS+8
@@ -100,35 +107,78 @@ local FS_SPIN = 11
 local FS_SQUISH = 12
 local FS_POGO = 13
 
-local REALTOFAKE = {
-	[S_KART_STND1] = 0,
-	[S_KART_STND2] = 0,
-	[S_KART_STND1_L] = 1,
-	[S_KART_STND2_L] = 1,
-	[S_KART_STND1_R] = 2,
-	[S_KART_STND2_R] = 2,
-	[S_KART_WALK1] = 3,
-	[S_KART_WALK2] = 3,
-	[S_KART_WALK1_L] = 4,
-	[S_KART_WALK2_L] = 4,
-	[S_KART_WALK1_R] = 5,
-	[S_KART_WALK2_R] = 5,
-	[S_KART_RUN1] = 6,
-	[S_KART_RUN2] = 6,
-	[S_KART_RUN1_L] = 7,
-	[S_KART_RUN2_L] = 7,
-	[S_KART_RUN1_R] = 8,
-	[S_KART_RUN2_R] = 8,
-	[S_KART_DRIFT1_L] = 9,
-	[S_KART_DRIFT2_L] = 9,
-	[S_KART_DRIFT1_R] = 10,
-	[S_KART_DRIFT2_R] = 10,
-	[S_KART_SPIN] = 11,
-	[S_KART_PAIN] = 11,
-	[S_KART_SQUISH] = 12,
+local REALTOFAKE = RINGS and {
+	[S_KART_STILL] = FS_STND,
+	[S_KART_STILL_L] = FS_STNDL,
+	[S_KART_STILL_R] = FS_STNDR,
+	[S_KART_STILL_GLANCE_L] = FS_STND,
+	[S_KART_STILL_GLANCE_R] = FS_STND,
+	[S_KART_STILL_LOOK_L] = FS_STND,
+	[S_KART_STILL_LOOK_R] = FS_STND,
+	[S_KART_SLOW] = FS_WALK,
+	[S_KART_SLOW_L] = FS_WALKL,
+	[S_KART_SLOW_R] = FS_WALKR,
+	[S_KART_SLOW_GLANCE_L] = FS_WALK,
+	[S_KART_SLOW_GLANCE_R] = FS_WALK,
+	[S_KART_SLOW_LOOK_L] = FS_WALK,
+	[S_KART_SLOW_LOOK_R] = FS_WALK,
+	[S_KART_FAST] = FS_RUN,
+	[S_KART_FAST_L] = FS_RUNL,
+	[S_KART_FAST_R] = FS_RUNR,
+	[S_KART_FAST_GLANCE_L] = FS_RUN,
+	[S_KART_FAST_GLANCE_R] = FS_RUN,
+	[S_KART_FAST_LOOK_L] = FS_RUN,
+	[S_KART_FAST_LOOK_R] = FS_RUN,
+	[S_KART_DRIFT_L] = FS_DRIFTL,
+	[S_KART_DRIFT_L_OUT] = FS_DRIFTL,
+	[S_KART_DRIFT_L_IN] = FS_DRIFTL,
+	[S_KART_DRIFT_R] = FS_DRIFTR,
+	[S_KART_DRIFT_R_OUT] = FS_DRIFTR,
+	[S_KART_DRIFT_R_IN] = FS_DRIFTR,
+	[S_KART_SPINOUT] = FS_SPIN,
+	[S_KART_DEAD] = FS_SPIN,
+} or {
+	[S_KART_STND1] = FS_STND,
+	[S_KART_STND2] = FS_STND,
+	[S_KART_STND1_L] = FS_STNDL,
+	[S_KART_STND2_L] = FS_STNDL,
+	[S_KART_STND1_R] = FS_STNDR,
+	[S_KART_STND2_R] = FS_STNDR,
+	[S_KART_WALK1] = FS_WALK,
+	[S_KART_WALK2] = FS_WALK,
+	[S_KART_WALK1_L] = FS_WALKL,
+	[S_KART_WALK2_L] = FS_WALKL,
+	[S_KART_WALK1_R] = FS_WALKR,
+	[S_KART_WALK2_R] = FS_WALKR,
+	[S_KART_RUN1] = FS_RUN,
+	[S_KART_RUN2] = FS_RUN,
+	[S_KART_RUN1_L] = FS_RUNL,
+	[S_KART_RUN2_L] = FS_RUNL,
+	[S_KART_RUN1_R] = FS_RUNR,
+	[S_KART_RUN2_R] = FS_RUNR,
+	[S_KART_DRIFT1_L] = FS_DRIFTL,
+	[S_KART_DRIFT2_L] = FS_DRIFTL,
+	[S_KART_DRIFT1_R] = FS_DRIFTR,
+	[S_KART_DRIFT2_R] = FS_DRIFTR,
+	[S_KART_SPIN] = FS_SPIN,
+	[S_KART_PAIN] = FS_SPIN,
+	[S_KART_SQUISH] = FS_SQUISH,
 }
 
-local FAKEFRAMES = {
+local FAKEFRAMES = RINGS and {
+	[FS_STND] = SPR2_STIN,
+	[FS_STNDL] = SPR2_STIL,
+	[FS_STNDR] = SPR2_STIR,
+	[FS_WALK] = SPR2_SLWN,
+	[FS_WALKL] = SPR2_SLWL,
+	[FS_WALKR] = SPR2_SLWR,
+	[FS_RUN] = SPR2_FSTN,
+	[FS_RUNL] = SPR2_FSTL,
+	[FS_RUNR] = SPR2_FSTR,
+	[FS_DRIFTL] = SPR2_DRLN,
+	[FS_DRIFTR] = SPR2_DRRN,
+	[FS_SPIN] = SPR2_SPIN,
+} or {
 	[FS_STND] = { A, B },
 	[FS_STNDL] = { C, D },
 	[FS_STNDR] = { E, F },
@@ -169,6 +219,20 @@ local function GetSimpleAnimalSequences(defs, skin)
 	return sacache[defs]
 end
 
+local function translate(p, str)
+	if RINGS then
+		if str == "driftend" then
+			return p.pflags & PF_DRIFTEND
+		elseif str == "getsparks" then
+			return p.pflags & PF_GETSPARKS
+		else
+			return p[str]
+		end
+	else
+		return p.kartstuff[_G["k_"..str]]
+	end
+end
+
 -- returns the fakeframe to write for this tic
 local function WriteFakeFrame(ghost, player)
 	-- an attempt at simple animal interop
@@ -185,9 +249,9 @@ local function WriteFakeFrame(ghost, player)
 		return 0
 	else
 		local frame = REALTOFAKE[player.mo.state] or 0
-		if (flags == FS_DRIFTL or flags == FS_DRIFTR) and player.kartstuff[k_driftend] then
+		if (flags == FS_DRIFTL or flags == FS_DRIFTR) and translate(player, "driftend") then
 			frame = FS_STND
-		elseif player.kartstuff[k_pogospring] then
+		elseif not RINGS and player.kartstuff[k_pogospring] then
 			frame = FS_POGO
 		end
 		return frame
@@ -226,7 +290,11 @@ local function ReadFakeFrame(framenum, skin)
 		elseif framenum == FS_DRIFTR then
 			fspecial = "driftr"
 		end
-		return fs[(leveltime % #fs) + 1], fspecial
+		if RINGS then
+			return fs, fspecial
+		else
+			return fs[(leveltime % #fs) + 1], fspecial
+		end
 	end
 end
 
@@ -256,28 +324,30 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 	end
 
 	-- and now, the specials
-	local ks = player.kartstuff
+	local sneakertimer = translate(player, "sneakertimer")
 
-	if ks[k_sneakertimer] > ghost.lastsneaker then
-		ghost.data = $..string.char(ks[k_sneakertimer] == 69 and GS_STARTBOOST or GS_SNEAKER)
+	if sneakertimer > ghost.lastsneaker then
+		ghost.data = $..string.char(sneakertimer == 69 and GS_STARTBOOST or GS_SNEAKER)
 	end
-	ghost.lastsneaker = ks[k_sneakertimer]
+	ghost.lastsneaker = sneakertimer
 
+	local driftcharge = translate(player, "driftcharge")
 	if player.playerstate == PST_LIVE then
 		local dsv = K_GetKartDriftSparkValue(player)
-		if ks[k_driftcharge] >= dsv*4 then
+		if driftcharge >= dsv*4 then
 			if ghost.lastspark ~= 3 then ghost.data = $..string.char(GS_RAINBOWSPARKS) end
 			ghost.lastspark = 3
-		elseif ks[k_driftcharge] >= dsv*2 then
+		elseif driftcharge >= dsv*2 then
 			if ghost.lastspark ~= 2 then ghost.data = $..string.char(GS_ORANGESPARKS) end
 			ghost.lastspark = 2
-		elseif ks[k_driftcharge] >= dsv then
+		elseif driftcharge >= dsv then
 			if ghost.lastspark ~= 1 then ghost.data = $..string.char(GS_BLUESPARKS) end
 			ghost.lastspark = 1
 		end
 	end
-	if ghost.lastspark and (not ks[k_driftcharge] or player.playerstate ~= PST_LIVE) then
-		if not (ks[k_spinouttimer] or player.mo.eflags & MFE_JUSTBOUNCEDWALL) and abs(ks[k_drift]) ~= 5 and ks[k_getsparks] and player.playerstate == PST_LIVE then
+	if ghost.lastspark and (not driftcharge or player.playerstate ~= PST_LIVE) then
+		local spinouttimer, drift, getsparks = translate(player, "spinouttimer"), translate(player, "drift"), translate(player, "getsparks")
+		if not (spinouttimer or player.mo.eflags & MFE_JUSTBOUNCEDWALL) and abs(drift) ~= 5 and getsparks and player.playerstate == PST_LIVE then
 			ghost.data = $..string.char(GS_DRIFTBOOST)
 		else
 			ghost.data = $..string.char(GS_NOSPARKS)
@@ -507,7 +577,7 @@ local function SpawnDriftSparks(r, direction)
 	elseif r.driftspark == 2 then
 		color = SKINCOLOR_KETCHUP
 	else
-		color = 1 + (leveltime % (MAXSKINCOLORS-1))
+		color = RINGS and FIRSTRAINBOWCOLOR + (leveltime % (FIRSTSUPERCOLOR - FIRSTRAINBOWCOLOR)) or 1 + (leveltime % (MAXSKINCOLORS-1))
 	end
 	local travelangle = pmo.angle - ANGLE_45*direction
 
@@ -570,6 +640,11 @@ local function MoveCombiLink(r)
 			link.frame = ($ & ~FF_FRAMEMASK) | leveltime/2 % 9
 		end
 	end
+end
+
+if RINGS then
+	freeslot("S_LBGHOST")
+	states[S_LBGHOST] = { sprite = SPR_PLAY, frame = FF_TRANS40 }
 end
 
 addHook("ThinkFrame", function()
@@ -648,7 +723,12 @@ addHook("ThinkFrame", function()
 			r.gmoma = $ + da
 
 			P_MoveOrigin(r.mo, r.mo.x + r.gmomx, r.mo.y + r.gmomy, r.mo.z + r.gmomz)
-			r.mo.frame = frame | FF_TRANS40
+			if RINGS then
+				states[S_LBGHOST].frame = ($ & ~FF_FRAMEMASK) | frame
+				r.mo.state = S_LBGHOST
+			else
+				r.mo.frame = frame | FF_TRANS40
+			end
 			r.realangle = $ + r.gmoma
 			r.mo.angle = r.realangle
 			if fspecial == "spin" then
@@ -716,14 +796,15 @@ addHook("ThinkFrame", function()
 		end
 
 		local inputofs = 0
-		if consoleplayer.cmd.driftturn >= 200 then
+		if consoleplayer.cmd[TURNING] >= 200 then
 			inputofs = ANGLE_90
-		elseif consoleplayer.cmd.driftturn <= -200 then
+		elseif consoleplayer.cmd[TURNING] <= -200 then
 			inputofs = -ANGLE_90
 		end
-		if consoleplayer.cmd.buttons & BT_FORWARD then
+		local throwdir = getThrowDir(consoleplayer)
+		if throwdir == 1 then -- BT_FORWARD
 			inputofs = inputofs/2
-		elseif consoleplayer.cmd.buttons & BT_BACKWARD then
+		elseif throwdir == -1 then -- BT_BACKWARD
 			inputofs = inputofs/2 + ANGLE_180
 		end
 
@@ -737,12 +818,6 @@ addHook("ThinkFrame", function()
 		consoleplayer.awayviewmobj = ghostcam
 		consoleplayer.awayviewaiming = -ANG10
 		consoleplayer.awayviewtics = 2
-		if leveltime == starttime then
-			S_StopMusic()
-		elseif leveltime == (starttime + TICRATE/2) then
-			S_ChangeMusic(mapheaderinfo[gamemap].musname, true, consoleplayer)
-			S_ShowMusicCredit()
-		end
 	end
 end)
 
@@ -765,12 +840,13 @@ local function GetKartSpeed(kartspeed, scale)
 end
 
 local function FakeSpeedometer(speed, scale)
-	local dp = CV_FindVar("kartdisplayspeed")
-	if dp.value == 1 then
+	local dp = CV_FindVar(RINGS and "speedometer" or "kartdisplayspeed")
+	local value = dp.value - (RINGS and 1 or 0)
+	if value == 1 then
 		return string.format("%3d KM/H", FixedDiv(FixedMul(speed, 142371), mapobjectscale)/FRACUNIT)
-	elseif dp.value == 2 then
+	elseif value == 2 then
 		return string.format("%3d MPH", FixedDiv(FixedMul(speed, 88465), mapobjectscale)/FRACUNIT)
-	elseif dp.value == 3 then
+	elseif value == 3 then
 		return string.format("%3d FU/T", FixedDiv(speed, mapobjectscale)/FRACUNIT)
 	else
 		return string.format("%3d %%", (FixedDiv(speed, FixedMul(GetKartSpeed(consoleplayer.kartspeed, scale), 62914))*100)/FRACUNIT)

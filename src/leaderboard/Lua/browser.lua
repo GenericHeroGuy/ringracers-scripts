@@ -12,11 +12,17 @@ local ModeSep
 -- lb_common.lua
 local ZoneAct = lb_ZoneAct
 local TicsToTime = lb_TicsToTime
+local drawNum = lb_draw_num
+local getThrowDir = lb_throw_dir
 
 -- lb_store.lua
 local GetMapRecords = lb_get_map_records
 
 -----------------------------
+
+local RINGS = VERSION == 2
+local TURNING = RINGS and "turning" or "driftturn"
+local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
 
 local cv_kartencore
 
@@ -105,10 +111,10 @@ end
 
 local function drawEncore(v)
 	if not cv_kartencore then
-		cv_kartencore = CV_FindVar("kartencore")
+		cv_kartencore = CV_FindVar(RINGS and "encore" or "kartencore")
 	end
 
-	if not cv_kartencore.value then
+	if cv_kartencore.value ~= 1 then
 		return
 	end
 
@@ -163,13 +169,15 @@ local function drawMapStrings(v)
 	)
 
 	-- subtitle
-	v.drawString(
-		hlfScrnWdth + titleWidth / 2 - zoneWidth,
-		ttlY + 8,
-		map.subttl,
-		V_MAGENTAMAP,
-		"small-right"
-	)
+	if not RINGS then
+		v.drawString(
+			hlfScrnWdth + titleWidth / 2 - zoneWidth,
+			ttlY + 8,
+			map.subttl,
+			V_MAGENTAMAP,
+			"small-right"
+		)
+	end
 
 	-- hell
 	if map.menuflags & LF2_HIDEINMENU then
@@ -362,6 +370,14 @@ local colorFlags = {
 	[1] = 0
 }
 
+local function getFace(v, skin)
+	if RINGS then
+		return v.getSprite2Patch(#skin, SPR2_XTRA, A)
+	else
+		return v.cachePatch(useHighresPortrait() and skin.facewant or skin.facerank)
+	end
+end
+
 local norank
 local function drawScore(v, i, pos, score, player)
 	local y = scoresY + i * 18
@@ -373,12 +389,12 @@ local function drawScore(v, i, pos, score, player)
 	end
 
 	-- position
-	v.drawNum(column[1], y, pos)
+	drawNum(v, column[1], y, pos)
 
 	-- facerank
 	for i, p in ipairs(score.players) do
 		local skin = skins[p.skin]
-		local facerank = skin and v.cachePatch(useHighresPortrait() and skin.facewant or skin.facerank) or norank
+		local facerank = skin and getFace(v, skin) or norank
 		local downscale = (facerank ~= norank and useHighresPortrait()) and 2 or 1
 		local color = p.color < MAXSKINCOLORS and p.color or 0
 		v.drawScaled((column[1] + ofs)<<FRACBITS, y<<FRACBITS, FRACUNIT/downscale, facerank, 0, v.getColormap(TC_DEFAULT, color))
@@ -501,19 +517,20 @@ local function resetKeyRepeat()
 	repeatCount = 0
 end
 
-local ValidButtons = BT_ACCELERATE | BT_BRAKE | BT_FORWARD | BT_BACKWARD | BT_DRIFT | BT_ATTACK
+local ValidButtons = BT_ACCELERATE | BT_BRAKE | BT_DRIFT | BT_ATTACK
 
 -- return value indicates we want to exit the browser
 local function controller(player)
 	keyRepeat = max(0, $ - 1)
+	local throwdir = getThrowDir(player)
 
-	if not (player.cmd.driftturn or player.cmd.buttons) then
+	if not (player.cmd[TURNING] or player.cmd.buttons or throwdir) then
 		resetKeyRepeat()
 	end
 
 	local cmd = player.cmd
 	if not keyRepeat then
-		if not (cmd.buttons & ValidButtons or cmd.driftturn) then
+		if not (cmd.buttons & ValidButtons or cmd[TURNING] or throwdir) then
 			return
 		end
 
@@ -526,18 +543,18 @@ local function controller(player)
 			COM_BufInsertText(player, "changelevel "..G_BuildMapName(maps[mapIndex]))
 			return true
 		elseif cmd.buttons & BT_ATTACK then
-			COM_BufInsertText(player, "encore")
-		elseif cmd.driftturn then
-			local dir = cmd.driftturn > 0 and -1 or 1
+			COM_BufInsertText(player, "lb_encore")
+		elseif cmd[TURNING] then
+			local dir = cmd[TURNING] > 0 and -1 or 1
 
 			if encoremode then
 				updateMapIndex(-dir)
 			else
 				updateMapIndex(dir)
 			end
-		elseif cmd.buttons & BT_FORWARD then
+		elseif throwdir == 1 then -- BT_FORWARD
 			scrollPos = $ - 1
-		elseif cmd.buttons & BT_BACKWARD then
+		elseif throwdir == -1 then -- BT_BACKWARD
 			scrollPos = $ + 1
 		elseif cmd.buttons & BT_DRIFT then
 			scrollPos = 1
