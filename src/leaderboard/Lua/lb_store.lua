@@ -16,7 +16,7 @@ local StringWriter = lb_string_writer
 ----------------------------
 
 local RINGS = VERSION == 2
-local open = RINGS and io.openlocal or io.open
+local open = RINGS and function(path, mode) return io.openlocal("client/"..path, mode) end or io.open
 
 local LEADERBOARD_FILE = "leaderboard.sav2"
 local LEADERBOARD_FILE_OLD = "leaderboard.coldstore.txt"
@@ -169,7 +169,7 @@ local function writeColdStore(store)
 	f:writeliteral("COLDSTORE")
 	f:writestr(cv_directory.string)
 	for map, checksums in pairs(LiveStore) do
-		f:writenum(map)
+		f:writestr(G_BuildMapName(map))
 		local numchecksums = 0
 		for _ in pairs(checksums) do
 			numchecksums = $ + 1
@@ -192,9 +192,9 @@ local function writeIndex()
 	f:writenum(NextID)
 
 	for mapid, checksums in pairs(LiveStore) do
-		if next(checksums) then f:writenum(mapid) end
+		if next(checksums) then f:writestr(G_BuildMapName(mapid)) end
 	end
-	f:writenum(0)
+	f:writestr("")
 
 	for id in pairs(Dirty) do
 		f:writenum(id)
@@ -407,7 +407,6 @@ local function oldParseScore(str)
 	checksum = $:sub(1, 4)
 
 	return score_t(
-		tonumber(t[1]), -- Map
 		flags,
 		tonumber(t[5]),	-- Time
 		splits,
@@ -420,11 +419,11 @@ local function oldParseScore(str)
 				""
 			)
 		}
-	), checksum
+	), tonumber(t[1]), checksum
 end
 rawset(_G, "lb_parse_score", oldParseScore)
 
-local function parseScoreBinary(f, map)
+local function parseScoreBinary(f)
 	local id = f:readnum()
 	local flags = f:readnum()
 	local time = f:readnum()
@@ -447,7 +446,6 @@ local function parseScoreBinary(f, map)
 	end
 
 	return score_t(
-		map,
 		flags,
 		time,
 		splits,
@@ -456,7 +454,7 @@ local function parseScoreBinary(f, map)
 	)
 end
 
-local function loadStore(f, filename, map)
+local function loadStore(f, filename)
 	local store = {}
 
 	if f:readliteral(11) ~= "LEADERBOARD" then
@@ -473,7 +471,7 @@ local function loadStore(f, filename, map)
 		local numrecords = f:readnum()
 		store[checksum] = {}
 		for j = 1, numrecords do
-			local score = parseScoreBinary(f, map)
+			local score = parseScoreBinary(f)
 			if score then
 				table.insert(store[checksum], score)
 			end
@@ -492,7 +490,7 @@ local function loadColdStore(f)
 	local servername = f:readstr()
 
 	while not f:empty() do
-		local mapnum = f:readnum()
+		local mapnum = mapnumFromExtended(f:readstr())
 		local numchecksums = f:readnum()
 		store[mapnum] = {}
 		for i = 1, numchecksums do
@@ -500,7 +498,7 @@ local function loadColdStore(f)
 			local numrecords = f:readnum()
 			store[mapnum][checksum] = {}
 			for j = 1, numrecords do
-				local score = parseScoreBinary(f, mapnum)
+				local score = parseScoreBinary(f)
 				if score then
 					table.insert(store[mapnum][checksum], score)
 				end
@@ -513,6 +511,7 @@ end
 
 -- Read and parse a store file
 local function loadStoreFile()
+	print("Loading store")
 	local index = StringReader(open(string.format("%s/%s.sav2", cv_directory.string, "index"), "rb"))
 	if index:read8() > INDEX_VERSION then
 		error("Failed to load index (too new)", 2)
@@ -521,15 +520,14 @@ local function loadStoreFile()
 
 	local store = {}
 	while true do
-		local mapid = index:readnum()
-		if not mapid then break end
-		print(G_BuildMapName(mapid))
-		local filename = string.format("%s/%s.sav2", cv_directory.string, G_BuildMapName(mapid))
+		local mapname = index:readstr()
+		if mapname == "" then break end
+		local filename = string.format("%s/%s.sav2", cv_directory.string, mapname)
 		local f = read_segmented(filename)
 		if f then
-			store[mapid] = loadStore(f, filename, mapid)
+			store[mapnumFromExtended(mapname)] = loadStore(f, filename)
 		else
-			print("file missing???")
+			print("File not found for "..mapname)
 		end
 	end
 
@@ -561,7 +559,6 @@ local function moveRecords(sourcemap, sourcesum, targetmap, targetsum, modeSep)
 		LiveStore[targetmap] = $ or {}
 		LiveStore[targetmap][targetsum] = $ or {}
 		for i, score in ipairs(LiveStore[sourcemap][sourcesum]) do
-			score.map = targetmap
 			Dirty[score.id] = true
 			insertOrReplace(LiveStore[targetmap][targetsum], score, modeSep)
 			moved = $ + 1
@@ -693,6 +690,7 @@ COM_AddCommand("lb_known_maps", function(player, map)
 	end
 end, COM_LOCAL)
 
+if not RINGS then
 COM_AddCommand("lb_convert_to_binary", function(player, filename)
 	filename = $ or LEADERBOARD_FILE_OLD
 	local f = open(filename)
@@ -704,11 +702,11 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 	LiveStore = {}
 	NextID = 1
 	for l in f:lines() do
-		local score, checksum = oldParseScore(l)
+		local score, map, checksum = oldParseScore(l)
 		score.id = NextID
-		LiveStore[score.map] = $ or {}
-		LiveStore[score.map][checksum] = $ or {}
-		table.insert(LiveStore[score.map][checksum], score)
+		LiveStore[map] = $ or {}
+		LiveStore[map][checksum] = $ or {}
+		table.insert(LiveStore[map][checksum], score)
 		NextID = $ + 1
 	end
 	f:close()
@@ -716,6 +714,18 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 
 	dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
 end, COM_LOCAL)
+end
 
 -- Load the livestore
-LiveStore = loadStoreFile()
+if RINGS then
+	-- maps are most likely not loaded yet, so we can't get their numbers
+	-- gotta wait until the game starts
+	local loaded = false
+	local function loadit()
+		if not loaded then loaded = true; LiveStore = loadStoreFile() end
+	end
+	addHook("MapChange", loadit)
+	addHook("NetVars", loadit)
+else
+	LiveStore = loadStoreFile()
+end

@@ -628,7 +628,8 @@ COM_AddCommand("rival", function(player, rival, page)
 					scores[mode],
 					{
 						rival = rivalScore,
-						your = yourScore
+						your = yourScore,
+						map = maplist[i]
 					}
 				)
 			end
@@ -640,7 +641,7 @@ COM_AddCommand("rival", function(player, rival, page)
 	local o = page * stop
 
 	local function sortf(a, b)
-		return a["rival"]["map"] < b["rival"]["map"]
+		return a.map < b.map
 	end
 
 	for mode, tbl in pairs(scores) do
@@ -666,7 +667,7 @@ COM_AddCommand("rival", function(player, rival, page)
 
 			print(string.format(
 				"%s\t%s\t%s%8s\t\x80%s",
-				G_BuildMapName(score.rival.map),
+				G_BuildMapName(score.map),
 				ticsToTime(score.rival.time),
 				color or "",
 				diff ~= nil and sym[diff<0] + ticsToTime(abs(diff)) or ticsToTime(0, true),
@@ -1326,11 +1327,11 @@ local function saveTime(player)
 	end
 
 	local newscore = score_t(
-		gamemap,
 		Flags,
 		TimeFinished,
 		splits,
-		players
+		players,
+		0
 	)
 
 	-- Check if you beat your previous best

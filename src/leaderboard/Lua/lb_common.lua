@@ -1,8 +1,7 @@
 local RINGS = VERSION == 2
 
-rawset(_G, "lb_score_t", function(map, flags, time, splits, players, id)
+rawset(_G, "lb_score_t", function(flags, time, splits, players, id)
 	return {
-		["map"]    = map,
 		["flags"]  = flags,
 		["time"]   = time,
 		["splits"] = splits,
@@ -95,7 +94,7 @@ rawset(_G, "lb_mapnum_from_extended", function(map)
 	if RINGS then
 		-- how do you convert a map's lumpname back to a number?
 		-- good question...
-		if tonumber(map) then
+		if tonumber(map) or not map:find("_", 1, true) then
 			return nil
 		else
 			return G_FindMapByNameOrCode(map), nil
