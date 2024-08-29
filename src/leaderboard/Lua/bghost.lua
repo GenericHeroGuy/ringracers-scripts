@@ -104,8 +104,14 @@ local FS_RUNR = 8
 local FS_DRIFTL = 9
 local FS_DRIFTR = 10
 local FS_SPIN = 11
+-- kart
 local FS_SQUISH = 12
 local FS_POGO = 13
+-- rings
+local FS_DRIFTLO = 12
+local FS_DRIFTLI = 13
+local FS_DRIFTRO = 14
+local FS_DRIFTRI = 15
 
 local REALTOFAKE = RINGS and {
 	[S_KART_STILL] = FS_STND,
@@ -130,11 +136,11 @@ local REALTOFAKE = RINGS and {
 	[S_KART_FAST_LOOK_L] = FS_RUN,
 	[S_KART_FAST_LOOK_R] = FS_RUN,
 	[S_KART_DRIFT_L] = FS_DRIFTL,
-	[S_KART_DRIFT_L_OUT] = FS_DRIFTL,
-	[S_KART_DRIFT_L_IN] = FS_DRIFTL,
+	[S_KART_DRIFT_L_OUT] = FS_DRIFTLO,
+	[S_KART_DRIFT_L_IN] = FS_DRIFTLI,
 	[S_KART_DRIFT_R] = FS_DRIFTR,
-	[S_KART_DRIFT_R_OUT] = FS_DRIFTR,
-	[S_KART_DRIFT_R_IN] = FS_DRIFTR,
+	[S_KART_DRIFT_R_OUT] = FS_DRIFTRO,
+	[S_KART_DRIFT_R_IN] = FS_DRIFTRI,
 	[S_KART_SPINOUT] = FS_SPIN,
 	[S_KART_DEAD] = FS_SPIN,
 } or {
@@ -176,7 +182,11 @@ local FAKEFRAMES = RINGS and {
 	[FS_RUNL] = SPR2_FSTL,
 	[FS_RUNR] = SPR2_FSTR,
 	[FS_DRIFTL] = SPR2_DRLN,
+	[FS_DRIFTLO] = SPR2_DRLO,
+	[FS_DRIFTLI] = SPR2_DRLI,
 	[FS_DRIFTR] = SPR2_DRRN,
+	[FS_DRIFTRO] = SPR2_DRRO,
+	[FS_DRIFTRI] = SPR2_DRRI,
 	[FS_SPIN] = SPR2_SPIN,
 } or {
 	[FS_STND] = { A, B },
@@ -225,6 +235,8 @@ local function translate(p, str)
 			return p.pflags & PF_DRIFTEND
 		elseif str == "getsparks" then
 			return p.pflags & PF_GETSPARKS
+		elseif str == "aizdriftstrat" then
+			return p.aizdriftstraft -- the gunching of 2021 and its consequences
 		else
 			return p[str]
 		end
@@ -283,11 +295,11 @@ local function ReadFakeFrame(framenum, skin)
 		return 0
 	else
 		local fs = FAKEFRAMES[framenum]
-		if framenum == FS_POGO or framenum == FS_SPIN then
+		if (not RINGS and framenum == FS_POGO) or framenum == FS_SPIN then
 			fspecial = "spin"
-		elseif framenum == FS_DRIFTL then
+		elseif framenum == FS_DRIFTL or RINGS and (framenum == FS_DRIFTLO or framenum == FS_DRIFTLI) then
 			fspecial = "driftl"
-		elseif framenum == FS_DRIFTR then
+		elseif framenum == FS_DRIFTR or RINGS and (framenum == FS_DRIFTRO or framenum == FS_DRIFTRI) then
 			fspecial = "driftr"
 		end
 		if RINGS then
@@ -299,13 +311,30 @@ local function ReadFakeFrame(framenum, skin)
 end
 
 -- ghost specials
-local GS_NOSPARKS = 0x81 -- removes drift sparks
-local GS_BLUESPARKS = 0x82 -- get blue sparks
-local GS_ORANGESPARKS = 0x83 -- get orange sparks
-local GS_RAINBOWSPARKS = 0x84 -- get rainbow sparks
-local GS_DRIFTBOOST = 0x85 -- get drift boost (implies GS_NOSPARKS)
-local GS_SNEAKER = 0x86 -- used sneaker
-local GS_STARTBOOST = 0x87 -- start boost
+local GS_SPARKS0 = 0x81 -- RR gray sparks
+local GS_NOSPARKS = 0x82 -- removes drift sparks
+local GS_SPARKS1 = 0x83 -- kart blue sparks, RR yellow sparks
+local GS_SPARKS2 = 0x84 -- kart red sparks, RR orange sparks
+local GS_SPARKS3 = 0x85 -- RR blue sparks
+local GS_SPARKS4 = 0x86 -- kart rainbow sparks, RR rainbow sparks
+local GS_DRIFTBOOST = 0x87 -- get drift boost (implies GS_NOSPARKS)
+local GS_BOOSTFLAME = 0x88 -- boostflame (formerly sneaker boost)
+local GS_NOITEM = 0x89 -- lost item
+local GS_ROULETTE = 0x8a -- started item roulette
+local GS_GETITEM = 0x8b -- rolled an item
+local GS_FASTLINES = 0x8c -- go fast
+local GS_RESPAWN = 0x8d -- respawn lasers AKA lightsnake
+local GS_SLIPTIDE = 0x8e -- you're slippin' an' tidin'!
+local GS_USERING = 0x8f -- yummy!
+local GS_SPINDASH = 0x90 -- RR charging spindash
+local GS_WAVEDASH = 0x91 -- RR wavedash charged
+local GS_FASTFALL = 0x92 -- RR fastfall
+local GS_TRICKED = 0x93 -- CATHOLOCISM BLAST!
+local GS_DEATH = 0x94 -- RR death sprite (i'm outta fakestates so...)
+local GS_ACROTRICK = 0x95 -- acrobasics trick spin
+
+local tins = table.insert
+local pickupring = {}
 
 local function WriteGhostTic(ghost, player, x, y, z, angle)
 	local flags = WriteFakeFrame(ghost, player)
@@ -322,41 +351,161 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 		flags = $ | 0x40
 		str = $..string.char(angle)
 	end
+	str = string.char(flags)..$
 
 	-- and now, the specials
-	local sneakertimer = translate(player, "sneakertimer")
+	local specials = {}
+	local ks = player.kartstuff
 
-	if sneakertimer > ghost.lastsneaker then
-		ghost.data = $..string.char(sneakertimer == 69 and GS_STARTBOOST or GS_SNEAKER)
+	local function testspec(special, current, last)
+		-- type issues.......
+		if (current and not last) or (not current and last) then
+			tins(specials, special)
+		end
 	end
-	ghost.lastsneaker = sneakertimer
 
-	local driftcharge = translate(player, "driftcharge")
+	if ghost.boostflame and ghost.boostflame.valid then
+		if ghost.boostflame.movecount > ghost.lastsneaker then
+			tins(specials, GS_BOOSTFLAME)
+		end
+		ghost.lastsneaker = ghost.boostflame.movecount
+	end
+
+	local drift, driftcharge = translate(player, "drift"), translate(player, "driftcharge")
 	if player.playerstate == PST_LIVE then
 		local dsv = K_GetKartDriftSparkValue(player)
 		if driftcharge >= dsv*4 then
-			if ghost.lastspark ~= 3 then ghost.data = $..string.char(GS_RAINBOWSPARKS) end
+			if ghost.lastspark ~= 4 then tins(specials, GS_SPARKS4) end
+			ghost.lastspark = 4
+		elseif RINGS and driftcharge >= dsv*3 then
+			if ghost.lastspark ~= 3 then tins(specials, GS_SPARKS3) end
 			ghost.lastspark = 3
 		elseif driftcharge >= dsv*2 then
-			if ghost.lastspark ~= 2 then ghost.data = $..string.char(GS_ORANGESPARKS) end
+			if ghost.lastspark ~= 2 then tins(specials, GS_SPARKS2) end
 			ghost.lastspark = 2
 		elseif driftcharge >= dsv then
-			if ghost.lastspark ~= 1 then ghost.data = $..string.char(GS_BLUESPARKS) end
+			if ghost.lastspark ~= 1 then tins(specials, GS_SPARKS1) end
 			ghost.lastspark = 1
+		elseif driftcharge < 0 then
+			if ghost.lastspark ~= -1 then tins(specials, GS_SPARKS0) end
+			ghost.lastspark = -1
 		end
 	end
 	if ghost.lastspark and (not driftcharge or player.playerstate ~= PST_LIVE) then
-		local spinouttimer, drift, getsparks = translate(player, "spinouttimer"), translate(player, "drift"), translate(player, "getsparks")
-		if not (spinouttimer or player.mo.eflags & MFE_JUSTBOUNCEDWALL) and abs(drift) ~= 5 and getsparks and player.playerstate == PST_LIVE then
-			ghost.data = $..string.char(GS_DRIFTBOOST)
+		local spinout
+		if RINGS then
+			spinout = P_PlayerInPain(player)
 		else
-			ghost.data = $..string.char(GS_NOSPARKS)
+			spinout = ks[k_spinouttimer] or ks[k_squishedtimer]
+		end
+		local getsparks = translate(player, "getsparks")
+		if not spinout -- can't be damaged
+		   and abs(drift) ~= 5 -- must have released it
+		   and player.playerstate == PST_LIVE -- must be alive
+		   and (RINGS or not (player.mo.eflags & MFE_JUSTBOUNCEDWALL)) -- in kart, can't touch a wall
+		   and (RINGS or getsparks) -- in kart, must be able to build sparks
+		   and (not RINGS or drift) then -- in RR, can't have lost it due to zero speed
+		                                 -- (in kart, releasing drift in midair resets k_drift)
+			tins(specials, GS_DRIFTBOOST)
+		else
+			tins(specials, GS_NOSPARKS)
 		end
 		ghost.lastspark = 0
 	end
 
-	ghost.data = $..string.char(flags)..str
+	local fastlines
+	if RINGS then
+		fastlines = (player.sneakertimer or player.ringboost or player.driftboost --[[or player.startboost lmao]]
+		             or player.eggmanexplode or player.trickboost or player.gateboost or player.wavedashboost)
+		            and player.speed > 0
+	else
+		fastlines = (ks[k_sneakertimer] or ks[k_driftboost] or ks[k_startboost])
+		            and player.speed > 0
+	end
+	testspec(GS_FASTLINES, fastlines, ghost.lastfastlines)
+	ghost.lastfastlines = fastlines
+
+	local respawn
+	if RINGS then
+		respawn = player.respawn.state and player.respawn.timer > 0
+	else
+		respawn = ks[k_respawn] > 1
+	end
+	testspec(GS_RESPAWN, respawn, ghost.lastrespawn)
+	ghost.lastrespawn = respawn
+
+	local roulette = not RINGS and ks[k_itemroulette]
+	if roulette and not ghost.lastroulette then
+		tins(specials, GS_ROULETTE)
+	end
+	local itemtype, itemamount = translate(player, "itemtype"), translate(player, "itemamount")
+	local havesneaker = itemtype == KITEM_SNEAKER and itemamount > 0
+	if havesneaker and not ghost.havesneaker then
+		tins(specials, GS_GETITEM)
+	elseif not havesneaker and ghost.havesneaker then
+		tins(specials, GS_NOITEM)
+	end
+	ghost.lastroulette = roulette
+	ghost.havesneaker = havesneaker
+
+	local aizdriftstrat = translate(player, "aizdriftstrat")
+	local sliptide = aizdriftstrat and not drift and P_IsObjectOnGround(player.mo) and player.playerstate == PST_LIVE
+	testspec(GS_SLIPTIDE, sliptide, ghost.lastsliptide)
+	ghost.lastsliptide = sliptide
+
+	if RINGS then
+		local usedring = pickupring[player]
+		if usedring then
+			tins(specials, GS_USERING)
+		end
+
+		local spindash = player.spindash
+		testspec(GS_SPINDASH, spindash, ghost.lastspindash)
+		ghost.lastspindash = spindash
+
+		local trick = player.trickpanel > 1 -- TRICKSTATE_READY
+		testspec(GS_TRICKED, trick, ghost.lasttrickpanel)
+		ghost.lasttrickpanel = trick
+
+		local death = player.mo.state == S_KART_DEAD
+		testspec(GS_DEATH, death, ghost.lastdeath)
+		ghost.lastdeath = death
+
+		local wavedash = player.wavedash > 60 -- HIDEWAVEDASHCHARGE
+		testspec(GS_WAVEDASH, wavedash, ghost.lastwavedash)
+		ghost.lastwavedash = wavedash
+
+		local fastfall = player.fastfall
+		testspec(GS_FASTFALL, fastfall, ghost.lastfastfall)
+		ghost.lastfastfall = fastfall
+	end
+
+	-- acro support!
+	-- boy am i glad i kept this variable after the refactor
+	local tricked = player.hastricked
+	testspec(GS_ACROTRICK, tricked, ghost.lasttricked)
+	ghost.lasttricked = tricked
+
+	ghost.data = $..string.char(unpack(specials))..str
 end
+
+if RINGS then
+-- oh boy, gotta detect ring usage
+local maybering
+addHook("PreThinkFrame", function()
+	maybering = nil
+	pickupring = {}
+end)
+addHook("MobjSpawn", function(mo)
+	maybering = mo
+end, MT_RING)
+addHook("PlayerThink", function(p)
+	if maybering and maybering.extravalue2 == 1 and maybering.state == S_FASTRING1 then
+		pickupring[p] = true
+	end
+	maybering = nil
+end)
+end -- if RINGS
 
 local recorders = {}
 
@@ -369,6 +518,15 @@ local function StartRecording(player)
 		data = table.concat(writer),
 		lastsneaker = 0,
 		lastspark = 0,
+		lastfastlines = false,
+		lastrespawn = false,
+		lastroulette = false,
+		havesneaker = false,
+		lastsliptide = false,
+		lastspindash = 0,
+		lasttrickpanel = 0,
+		lastdeath = false,
+		lasttricked = false,
 
 		momlog = { x = 0, y = 0, z = 0, a = 0 },
 		errorx = 0,
@@ -406,8 +564,17 @@ addHook("MapChange", function()
 	recorders = {}
 end)
 
+-- can't rely on sneakertimer alone to check for boostflames...
+-- and well, GS_SNEAKER is only used for the boostflame now anyways, so fuck it
+addHook("MobjThinker", function(mo)
+	local player = mo.target and mo.target.player
+	if recorders[player] then
+		recorders[player].boostflame = mo
+	end
+end, MT_BOOSTFLAME)
+
 addHook("ThinkFrame", function()
-	if not leveltime then return end
+	if defrosting then return end
 	for player, g in pairs(recorders) do
 		if not player.valid or player.spectator then StopRecording(player); continue end
 
@@ -417,7 +584,8 @@ addHook("ThinkFrame", function()
 		-- i have no clue what to do about the whiplash from teleports
 
 		local mold = g.momlog
-		local mnew = { x = player.mo.x - g.fakex, y = player.mo.y - g.fakey, z = player.mo.z - g.fakez, a = player.mo.angle - g.fakea }
+		local angle = (RINGS and player.respawn.state == 1) and player.drawangle or player.mo.angle
+		local mnew = { x = player.mo.x - g.fakex, y = player.mo.y - g.fakey, z = player.mo.z - g.fakez, a = angle - g.fakea }
 		g.momlog = mnew
 
 		local dx, dy, dz, da = mnew.x - mold.x, mnew.y - mold.y, mnew.z - mold.z, mnew.a - mold.a
@@ -501,9 +669,23 @@ local function PlayGhost(record)
 
 			-- purely visual, just for showing vfx
 			boostflame = false,
-			sneakertimer = 0,
 			driftspark = 0,
-			driftboost = 0,
+			drifthilite = 0,
+			drifthilitecolor = 0,
+			fastlines = false,
+			respawning = false,
+			hasitem = 0,
+			sliptiding = false,
+			driftdir = 0,
+			sliptilt = 0,
+			spindashing = false,
+			wavedashing = false,
+			wavedashspin = false,
+			fastfalling = false,
+			fastfallwave = false,
+			tricking = false,
+			dead = false,
+			acrotrick = false,
 		}, { __index = do error("no", 2) end, __newindex = do error("no", 2) end })
 		table.insert(ghosts, ghost)
 		replayers[ghost] = true
@@ -570,14 +752,22 @@ local starttime = 6*TICRATE + (3*TICRATE/4)
 local ghostcustom2 = 0
 
 local function SpawnDriftSparks(r, direction)
+	if leveltime % 2 == 1 then
+		return
+	end
+
 	local pmo = r.mo
 	local color
 	if r.driftspark == 1 then
-		color = SKINCOLOR_SAPPHIRE
+		color = RINGS and SKINCOLOR_GOLD or SKINCOLOR_SAPPHIRE
 	elseif r.driftspark == 2 then
 		color = SKINCOLOR_KETCHUP
-	else
+	elseif r.driftspark == 3 then
+		color = SKINCOLOR_BLUE
+	elseif r.driftspark == 4 then
 		color = RINGS and FIRSTRAINBOWCOLOR + (leveltime % (FIRSTSUPERCOLOR - FIRSTRAINBOWCOLOR)) or 1 + (leveltime % (MAXSKINCOLORS-1))
+	elseif r.driftspark == -1 then
+		color = SKINCOLOR_SILVER
 	end
 	local travelangle = pmo.angle - ANGLE_45*direction
 
@@ -642,13 +832,107 @@ local function MoveCombiLink(r)
 	end
 end
 
-if RINGS then
-	freeslot("S_LBGHOST")
-	states[S_LBGHOST] = { sprite = SPR_PLAY, frame = FF_TRANS40 }
+local function SpawnAIZDust(r, direction)
+	if leveltime % 2 == 1 then
+		return
+	end
+
+	local travelangle = R_PointToAngle2(0, 0, r.gmomx, r.gmomy)
+	local stratangle = ANGLE_45*direction
+
+	local newx = r.mo.x + P_ReturnThrustX(travelangle - stratangle, 24*r.mo.scale)
+	local newy = r.mo.y + P_ReturnThrustY(travelangle - stratangle, 24*r.mo.scale)
+	local spark = P_SpawnMobj(newx, newy, r.mo.z, MT_AIZDRIFTSTRAT)
+
+	spark.angle = travelangle + stratangle*2
+	spark.scale = 3*r.mo.scale/4
+
+	spark.momx = 6*r.gmomx/5
+	spark.momy = 6*r.gmomy/5
+	//spark.momz = r.gmomz/2
+
+	K_MatchGenericExtraFlags(spark, r.mo)
 end
 
+local function SpawnSpindashDust(r)
+	local rad = FixedDiv(FixedHypot(r.mo.radius, r.mo.radius), r.mo.scale)
+
+	for i = 0, 1 do
+		local hmomentum = randomrange(6, 12) * r.mo.scale
+		local vmomentum = randomrange(2, 6) * r.mo.scale
+
+		local ang = r.mo.angle + ANGLE_180
+
+		if i & 1 then
+			ang = $ - ANGLE_45
+		else
+			ang = $ + ANGLE_45
+		end
+
+		local dust = P_SpawnMobjFromMobj(r.mo,
+			FixedMul(rad, cos(ang)),
+			FixedMul(rad, sin(ang)),
+			0, MT_SPINDASHDUST
+		)
+
+		dust.momx = FixedMul(hmomentum, cos(ang))
+		dust.momy = FixedMul(hmomentum, sin(ang))
+		dust.momz = vmomentum * P_MobjFlip(dust)
+	end
+end
+
+local function SpawnDEZLasers(r)
+	if RINGS and FixedHypot(FixedHypot(r.gmomx, r.gmomy), r.gmomz) > mapobjectscale*32 then
+		-- i guess i COULD read ahead of the ghost data to spawn the particles ahead of you...
+		-- but that's a can of worms i'm not gonna open tonight
+		local mo = P_SpawnMobj(r.mo.x, r.mo.y, r.mo.z, MT_DEZLASER)
+		mo.state = S_DEZLASER_TRAIL3
+		if r.mo.eflags & MFE_VERTICALFLIP then
+			mo.eflags = $ | MFE_VERTICALFLIP
+		end
+		mo.target = r.mo
+		mo.angle = R_PointToAngle2(0, 0, r.gmomx, r.gmomy) + ANGLE_90
+	elseif not (leveltime % 8) then
+		for i = 0, 7 do
+			local newangle = ANGLE_45*i
+			local newx = r.mo.x + P_ReturnThrustX(newangle, 31*mapobjectscale)
+			local newy = r.mo.y + P_ReturnThrustY(newangle, 31*mapobjectscale)
+			local newz = r.mo.z + (r.mo.eflags & MFE_VERTICALFLIP and r.mo.height or 0)
+
+			local mo = P_SpawnMobj(newx, newy, newz, MT_DEZLASER)
+			if r.mo.eflags & MFE_VERTICALFLIP then
+				mo.eflags = $ | MFE_VERTICALFLIP
+			end
+			mo.target = r.mo
+			mo.angle = newangle+ANGLE_90
+			mo.momz = (8*mapobjectscale) * P_MobjFlip(r.mo)
+		end
+	end
+end
+
+local SpawnRing
+
+-- need a state to cycle sprite2 frames in ring racers
+freeslot("S_LBGHOST")
+local S_LBGHOST = S_LBGHOST
+local ghoststate = states[S_LBGHOST]
+ghoststate.sprite = SPR_PLAY
+ghoststate.tics = -1 -- easy to forget
+
+local booleans = {
+	[GS_FASTLINES] = "fastlines",
+	[GS_RESPAWN] = "respawning",
+	[GS_SLIPTIDE] = "sliptiding",
+	[GS_SPINDASH] = "spindashing",
+	[GS_WAVEDASH] = "wavedashing",
+	[GS_FASTFALL] = "fastfalling",
+	[GS_TRICKED] = "tricking",
+	[GS_DEATH] = "dead",
+	[GS_ACROTRICK] = "acrotrick",
+}
+
 addHook("ThinkFrame", function()
-	if not leveltime then return end
+	if defrosting then return end
 	--[[
 	if not next(replayers) then
 		if ghostwatching then
@@ -678,34 +962,33 @@ addHook("ThinkFrame", function()
 	for r in pairs(replayers) do
 		if leveltime < r.startofs then
 			continue
-		elseif leveltime == r.startofs + 1 then -- + 1 because if ghost starts on leveltime 0, rec/play hasn't ran yet
+		elseif leveltime == r.startofs then
 			r.mo.flags = $ & ~MF_NOSECTOR
 		end
 		if not r.file:empty() then
 			local flags
 			repeat -- for all the specials
 				flags = r.file:read8()
-				if flags == GS_SNEAKER or flags == GS_STARTBOOST then
-					r.sneakertimer = flags == GS_SNEAKER and TICRATE + (TICRATE/3) or 70
-					if not (r.boostflame and r.boostflame.valid) then
-						r.boostflame = P_SpawnMobj(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
-						r.boostflame.state = S_BOOSTFLAME
-						r.boostflame.scale = r.mo.scale
-						r.boostflame.frame = $ | FF_TRANS40
-					else
-						r.boostflame.state = S_BOOSTFLAME
-					end
-				elseif flags >= GS_NOSPARKS and flags <= GS_RAINBOWSPARKS then
+				if flags >= GS_SPARKS0 and flags <= GS_SPARKS4 then
 					r.driftspark = flags - GS_NOSPARKS
 				elseif flags == GS_DRIFTBOOST then
-					if r.driftspark == 1 then
-						r.driftboost = $ < 20 and 20 or 0
-					elseif r.driftspark == 2 then
-						r.driftboost = $ < 50 and 50 or 0
-					else
-						r.driftboost = $ < 125 and 125 or 0
-					end
+					r.drifthilite = 0
+					r.drifthilitecolor = r.driftspark
 					r.driftspark = 0
+				elseif flags == GS_BOOSTFLAME then
+					if not (r.boostflame and r.boostflame.valid) then
+						r.boostflame = P_SpawnMobj(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
+						r.boostflame.scale = r.mo.scale
+					end
+					r.boostflame.state = S_BOOSTFLAME
+					r.boostflame.frame = $ | FF_TRANS40
+				elseif flags == GS_USERING then
+					SpawnRing(r)
+				elseif flags >= GS_NOITEM and flags <= GS_GETITEM then
+					r.hasitem = flags - GS_NOITEM
+				elseif flags & 0x80 then
+					local var = booleans[flags]
+					r[var] = not $
 				end
 			until flags & 0x80 == 0
 
@@ -714,6 +997,10 @@ addHook("ThinkFrame", function()
 			local dz = (flags & 0x20) and BloatToFixed(r.file:read8())
 			local da = (flags & 0x40) and BloatToFixed(r.file:read8())
 			local frame, fspecial = ReadFakeFrame(flags & 0x0f, r.mo.skin)
+			if r.dead then frame, fspecial = SPR2_DEAD, "" end
+			if RINGS and frame == SPR2_STIL and not P_IsValidSprite2(r.mo, frame) then
+				frame = spr2defaults[frame]
+			end
 
 			r.fakeframe = flags & 0x0f
 			r.fspecial = fspecial
@@ -724,7 +1011,7 @@ addHook("ThinkFrame", function()
 
 			P_MoveOrigin(r.mo, r.mo.x + r.gmomx, r.mo.y + r.gmomy, r.mo.z + r.gmomz)
 			if RINGS then
-				states[S_LBGHOST].frame = ($ & ~FF_FRAMEMASK) | frame
+				ghoststate.frame = frame | FF_TRANS40
 				r.mo.state = S_LBGHOST
 			else
 				r.mo.frame = frame | FF_TRANS40
@@ -754,14 +1041,123 @@ addHook("ThinkFrame", function()
 					P_Thrust(smoke, r.boostflame.angle+FixedAngle(randomrange(135, 225)<<FRACBITS), randomrange(0, 8) * r.mo.scale)
 				end
 			end
-			if r.driftspark and r.mo.z < r.mo.floorz + mapobjectscale*8 then
-				SpawnDriftSparks(r, fspecial == "driftl" and 1 or -1)
+			local dir = 0
+			if fspecial == "driftl" then
+				dir = 1
+			elseif fspecial == "driftr" then
+				dir = -1
 			end
-			if r.driftboost or r.sneakertimer then
+			r.driftdir = dir or $ -- for sliptide
+			if r.driftspark and (RINGS or r.mo.z < r.mo.floorz + mapobjectscale*8) then
+				SpawnDriftSparks(r, r.driftdir)
+			end
+			if r.fastlines then
 				SpawnFastLines(r)
 			end
-			r.driftboost = max($ - 1, 0)
-			r.sneakertimer = max($ - 1, 0)
+			if r.sliptiding then
+				SpawnAIZDust(r, r.driftdir)
+			end
+			if r.respawning then
+				SpawnDEZLasers(r)
+			end
+
+			if RINGS then
+				if dir then -- drawangle offset for drifting
+					r.mo.angle = $ + ANGLE_45*dir
+				end
+				if r.tricking then
+					-- i might have to rethink frame specials
+					r.mo.angle = $ + (ANGLE_22h*(leveltime%16))
+				end
+
+				if r.spindashing then
+					SpawnSpindashDust(r)
+					r.mo.spritexoffset = (leveltime & 1 or -1)*FRACUNIT
+					r.mo.spriteyoffset = 3*(leveltime % 3 - 1)*FRACUNIT/2
+				else
+					r.mo.spritexoffset = 0
+					r.mo.spriteyoffset = 0
+				end
+
+				if r.sliptiding then
+					if abs(r.sliptilt) < ANGLE_22h then
+						r.sliptilt = (abs($) + ANGLE_11hh/4)*r.driftdir
+					end
+				else
+					r.sliptilt = $ - $/4
+					if abs(r.sliptilt) < ANGLE_11hh / 4 then
+						r.sliptilt = 0
+					end
+				end
+				local angle = R_PointToAngle(r.mo.x, r.mo.y) - r.mo.angle
+				r.mo.rollangle = FixedMul(r.sliptilt, sin(abs(angle))) + FixedMul(r.sliptilt, cos(angle))
+				--r.mo.angle = $ + r.sliptilt*4
+
+				if r.fastfalling then
+					if not r.fastfallwave then
+						r.fastfallwave = SpawnLocal(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
+						r.fastfallwave.state = S_SOFTLANDING1
+						r.fastfallwave.flags = $ & ~MF_NOCLIPHEIGHT
+						r.fastfallwave.renderflags = RF_NOSPLATBILLBOARD|RF_OBJECTSLOPESPLAT
+					end
+					local wave = r.fastfallwave
+					wave.frame = ($ & ~FF_FRAMEMASK) | (leveltime/4)%5
+
+					if leveltime % 2 then
+						wave.renderflags = $ | RF_DONTDRAW
+					else
+						wave.renderflags = $ & ~RF_DONTDRAW
+					end
+
+					// Cast like a shadow on the ground
+					P_MoveOrigin(wave, r.mo.x, r.mo.y, r.mo.floorz)
+					--wave.standingslope = r.mo.standingslope
+					P_TryMove(wave, wave.x, wave.y)
+
+					if r.gmomz < -24 * mapobjectscale then
+						// Going down, falling through hoops
+						local ghost = P_SpawnGhostMobj(wave)
+						-- bruh
+						P_SetOrigin(ghost, wave.x, wave.y, wave.z+1)
+
+						ghost.z = r.mo.z
+						ghost.momz = -r.gmomz
+						--ghost.standingslope = nil
+						P_TryMove(ghost, ghost.x, ghost.y)
+
+						ghost.renderflags = wave.renderflags
+						ghost.fuse = 16
+						ghost.extravalue1 = 1
+						ghost.extravalue2 = 0
+					end
+				elseif r.fastfallwave then
+					P_RemoveMobj(r.fastfallwave)
+					r.fastfallwave = false
+				end
+
+				if r.wavedashing then
+					if not r.wavedashspin then
+						r.wavedashspin = SpawnLocal(r.mo.x, r.mo.y, r.mo.z, MT_WAVEDASH)
+						r.wavedashspin.frame = FF_PAPERSPRITE|FF_TRANS40|H -- H
+					end
+					local mo = r.wavedashspin
+					local angle = R_PointToAngle2(0, 0, r.gmomx, r.gmomy)
+					P_MoveOrigin(mo, r.mo.x - FixedMul(40*mapobjectscale, cos(angle)),
+					                 r.mo.y - FixedMul(40*mapobjectscale, sin(angle)),
+					                 r.mo.z + r.mo.height/2)
+					mo.angle = angle + ANGLE_90
+					mo.scale = 3*r.mo.scale/2
+					mo.rollangle = $ + ANGLE_22h
+				elseif r.wavedashspin then
+					P_RemoveMobj(r.wavedashspin)
+					r.wavedashspin = false
+				end
+			end
+
+			if r.acrotrick then
+				-- i REALLY need to rethink frame specials
+				r.mo.angle = $ + (ANG30*(leveltime%12))
+			end
 		else
 			print("Finished")
 			StopPlaying(r)
@@ -785,7 +1181,7 @@ addHook("ThinkFrame", function()
 
 	local r = ghostwatching
 	if r then
-		local fspecial = r.fakeframe == FS_POGO and r.lastfspecial or r.fspecial
+		local fspecial = not RINGS and r.fakeframe == FS_POGO and r.lastfspecial or r.fspecial
 		r.lastfspecial = fspecial
 		if fspecial == "driftl" and r.angofs < ANG2 then
 			if r.angofs > -ANG30 then r.angofs = $ - ANG1 end
@@ -795,6 +1191,9 @@ addHook("ThinkFrame", function()
 			r.angofs = 3*r.angofs/4
 		end
 
+		local dist = 160*mapobjectscale
+		local height = 95*mapobjectscale
+
 		local inputofs = 0
 		if consoleplayer.cmd[TURNING] >= 200 then
 			inputofs = ANGLE_90
@@ -803,23 +1202,69 @@ addHook("ThinkFrame", function()
 		end
 		local throwdir = getThrowDir(consoleplayer)
 		if throwdir == 1 then -- BT_FORWARD
-			inputofs = inputofs/2
+			if inputofs then
+				inputofs = inputofs/2
+			else
+				height = $ + 200*mapobjectscale
+				dist = $ + 50*mapobjectscale
+			end
 		elseif throwdir == -1 then -- BT_BACKWARD
 			inputofs = inputofs/2 + ANGLE_180
 		end
 
 		local camangle = r.realangle + r.angofs + inputofs
 		P_MoveOrigin(ghostcam,
-			r.mo.x - P_ReturnThrustX(camangle, 160*mapobjectscale) - P_ReturnThrustX(camangle+ANGLE_90, r.angofs/256),
-			r.mo.y - P_ReturnThrustY(camangle, 160*mapobjectscale) - P_ReturnThrustY(camangle+ANGLE_90, r.angofs/256),
-			r.mo.z + 75*mapobjectscale
+			r.mo.x - P_ReturnThrustX(camangle, dist) - P_ReturnThrustX(camangle+ANGLE_90, FixedMul(r.angofs, mapobjectscale/128)),
+			r.mo.y - P_ReturnThrustY(camangle, dist) - P_ReturnThrustY(camangle+ANGLE_90, FixedMul(r.angofs, mapobjectscale/128)),
+			r.mo.z + height - (not RINGS and 20*FRACUNIT or 0)
 		)
 		ghostcam.angle = camangle
 		consoleplayer.awayviewmobj = ghostcam
-		consoleplayer.awayviewaiming = -ANG10
+		local pitch = -R_PointToAngle2(0, 0, dist, height)
+		pitch = $ + ANG20
+		if RINGS then
+			ghostcam.pitch = pitch
+		else
+			consoleplayer.awayviewaiming = pitch
+		end
 		consoleplayer.awayviewtics = 2
 	end
 end)
+
+if RINGS then
+local ringthinkers = {}
+
+function SpawnRing(r)
+	local ring = SpawnLocal(r.mo.x, r.mo.y, r.mo.z + r.mo.height, MT_THOK)
+	ring.state = S_FASTRING1
+	ring.target = r.mo
+	ring.extravalue1 = 1
+	ring.frame = $ | FF_TRANS40
+	ringthinkers[ring] = true
+end
+
+addHook("ThinkFrame", function()
+	for mo in pairs(ringthinkers) do
+		if not mo.valid then
+			ringthinkers[mo] = nil
+			continue
+		end
+		if not mo.target or mo.extravalue1 >= 21 then
+			P_RemoveMobj(mo) -- doesn't invalidate, because it's NOTHINK
+			ringthinkers[mo] = nil
+			continue
+		end
+
+		local target = mo.target
+		local hop = FixedMul(80*target.scale, sin(FixedAngle((90 - (9 * abs(10 - mo.extravalue1))) << FRACBITS)))
+		K_MatchGenericExtraFlags(mo, target)
+		P_MoveOrigin(mo, target.x, target.y, target.z + (target.height + hop) * P_MobjFlip(target))
+		local frame = (mo.extravalue1 - 1) * 2 % 24
+		mo.extravalue1 = $ + 1
+		mo.frame = ($ & ~FF_FRAMEMASK) | frame
+	end
+end)
+end -- if RINGS
 
 ----------------------------------------------------------------------
 
@@ -855,23 +1300,42 @@ end
 
 hud.add(function(v, p)
 	if ghostwatching then
-		local flags = V_ALLOWLOWERCASE|V_HUDTRANS
-		v.drawString(160, 16, "Watching:", flags, "center")
-		v.drawString(160, 24, ghostwatching.name, flags|V_YELLOWMAP, "center")
+		local flags = V_ALLOWLOWERCASE|V_SNAPTOTOP
+		local trans = V_HUDTRANS
+		v.drawString(160, 16, "Watching:", flags|trans, "center")
+		v.drawString(160, 24, ghostwatching.name, flags|trans|V_YELLOWMAP, "center")
+
 		local speed = FakeSpeedometer(FixedHypot(ghostwatching.gmomx, ghostwatching.gmomy), ghostwatching.mo.scale)
-		local color
-		if ghostwatching.driftboost > 50 then
-			color = V_PURPLEMAP
-		elseif ghostwatching.driftboost > 20 then
-			color = V_REDMAP
-		elseif ghostwatching.driftboost then
-			color = V_BLUEMAP
+		flags = ($ & ~V_SNAPTOTOP) | V_MONOSPACE|V_SNAPTOBOTTOM
+		v.drawString(160, 161, speed, flags|trans, "center")
+
+		if ghostwatching.drifthilitecolor then
+			local color
+			if ghostwatching.drifthilitecolor == 1 then
+				color = RINGS and V_YELLOWMAP or V_BLUEMAP
+			elseif ghostwatching.drifthilitecolor == 2 then
+				color = V_REDMAP
+			elseif ghostwatching.drifthilitecolor == 3 then
+				color = V_BLUEMAP
+			elseif ghostwatching.drifthilitecolor == 4 then
+				color = V_PURPLEMAP
+			else
+				color = V_GRAYMAP
+			end
+			trans = V_10TRANS * (ghostwatching.drifthilite / 2)
+			v.drawString(160, 161, speed, flags|trans|color, "center")
+			ghostwatching.drifthilite = $ + 1
+			if ghostwatching.drifthilite == 2*10 then
+				ghostwatching.drifthilitecolor = 0
+			end
 		end
-		flags = $ | V_MONOSPACE
-		v.drawString(160, 161, speed, flags, "center")
-		if color then
-			flags = ($ & ~V_HUDTRANS) | V_HUDTRANSHALF
-			v.drawString(160, 161, speed, flags|color, "center")
+
+		if ghostwatching.hasitem == 1 then
+			trans = V_HUDTRANSHALF
+			v.draw(142, 142, v.cachePatch("K_ISSHOE"), flags|trans, v.getColormap(TC_RAINBOW, ghostwatching.mo.color))
+		elseif ghostwatching.hasitem == 2 then
+			trans = V_HUDTRANS
+			v.draw(142, 142, v.cachePatch("K_ISSHOE"), flags|trans)
 		end
 	end
 
