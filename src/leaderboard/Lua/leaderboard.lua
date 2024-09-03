@@ -72,8 +72,7 @@ local RedFlash = {
 }
 
 local UNCLAIMED = "Unclaimed Record"
-local HELP_MESSAGE = "\x88Leaderboard Commands:\n\x89retry exit findmap changelevel spba_clearcheats lb_gui rival scroll encore records levelselect lb_ghost_hide lb_ghost_trans_prox"
-local FILENAME = "leaderboard.txt"
+local HELP_MESSAGE = "\x88Leaderboard Commands:\n\x89retry exit findmap changelevel spba_clearcheats lb_gui rival scroll lb_encore records levelselect lb_ghost_hide"
 
 -- Retry / changelevel map
 local nextMap = nil
@@ -81,6 +80,7 @@ local nextMap = nil
 local Flags = 0
 local F_COMBI = lb_flag_combi
 local F_ENCORE = lb_flag_encore
+local F_HASGHOST = lb_flag_hasghost
 
 -- SPB flags with the least significance first
 local F_SPBATK = lb_flag_spbatk
@@ -193,13 +193,6 @@ local cv_enable = CV_RegisterVar({
 	end
 })
 
-local cv_saves = CV_RegisterVar({
-	name = "lb_save_count",
-	defaultvalue = 20,
-	flags = CV_NETVAR,
-	PossibleValue = CV_Natural
-})
-
 local cv_interrupt = CV_RegisterVar({
 	name = "lb_interrupt",
 	defaultvalue = 0,
@@ -224,6 +217,19 @@ local cv_spb_separate = CV_RegisterVar({
 			ST_SEP = F_SPBATK | F_COMBI | F_SPBBIG | F_SPBEXP
 		end
 	end
+})
+
+local cv_ghosts = CV_RegisterVar({
+	name = "lb_ghost",
+	flags = CV_NETVAR,
+	defaultvalue = "On",
+	PossibleValue = CV_OnOff
+})
+
+local cv_hideghosts = CV_RegisterVar({
+	name = "lb_ghost_hide",
+	defaultvalue = "Off",
+	PossibleValue = CV_OnOff
 })
 
 rawset(_G, "LB_Disable", function()
@@ -313,7 +319,7 @@ local function initLeaderboard(player)
 	for p in players.iterate do
 		if (p.spectator or disable) then
 			if GhostIsRecording(p) then GhostStopRecording(p) end
-		elseif not (p.spectator or GhostIsRecording(p)) then
+		elseif not (p.spectator or GhostIsRecording(p) or not cv_ghosts.value) then
 			GhostStartRecording(p)
 		end
 	end
@@ -766,7 +772,9 @@ addHook("MapLoad", function()
 	for mode, records in pairs(MapRecords) do
 		if mode & ST_SEP ~= Flags & ST_SEP then continue end
 		for _, score in ipairs(records) do
-			-- TODO if not (score.flags & F_HASGHOST) then continue end
+			if not (score.flags & F_HASGHOST) or cv_hideghosts.value or not cv_ghosts.value then
+				continue
+			end
 			if not (GhostStartPlaying(score) or isserver) then
 				local map = gamemap
 				CommsRequestGhosts(score.id, function(ok, data)
@@ -1313,21 +1321,27 @@ local function saveTime(player)
 
 	ScoreTable = $ or {}
 
+	local extraflags = cv_ghosts.value and F_HASGHOST or 0
+
 	local players = {}
 	local gamers = getGamers()
 	for _, p in ipairs(gamers) do
 		local pskin = skins[p.mo.skin]
+		local ghost = GhostIsRecording(p) and GhostStopRecording(p) or nil
+		if not ghost then
+			extraflags = $ & ~F_HASGHOST
+		end
 		table.insert(players, player_t(
 			p.name,
 			p.mo.skin,
 			p.skincolor,
 			stat_t(p.HMRs or pskin.kartspeed, p.HMRw or pskin.kartweight),
-			GhostStopRecording(p)
+			ghost
 		))
 	end
 
 	local newscore = score_t(
-		Flags,
+		Flags | extraflags,
 		TimeFinished,
 		splits,
 		players,

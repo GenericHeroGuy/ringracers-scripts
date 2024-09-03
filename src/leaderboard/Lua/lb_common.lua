@@ -55,8 +55,9 @@ rawset(_G, "lb_flag_spbatk", 0x1)
 rawset(_G, "lb_flag_spbjus", 0x2)
 rawset(_G, "lb_flag_spbbig", 0x4)
 rawset(_G, "lb_flag_spbexp", 0x8)
-rawset(_G, "lb_flag_encore", 0x80)
 rawset(_G, "lb_flag_combi", 0x10)
+rawset(_G, "lb_flag_hasghost", 0x20)
+rawset(_G, "lb_flag_encore", 0x80)
 local F_SPBBIG = lb_flag_spbbig
 local F_SPBEXP = lb_flag_spbexp
 

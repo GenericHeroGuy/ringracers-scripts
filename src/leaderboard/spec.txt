@@ -14,6 +14,7 @@ num NUMRECORDS
 	// b2:   SPBA KARTBIG
 	// b3:   SPBA expert
 	// b4:   combi
+	// b5:   has ghosts
 	// b7:   encore
 
 	num TIME

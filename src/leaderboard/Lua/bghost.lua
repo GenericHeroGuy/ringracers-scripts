@@ -15,6 +15,15 @@ local TURNING = RINGS and "turning" or "driftturn"
 local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
 local FIRSTRAINBOWCOLOR = SKINCOLOR_PINK
 
+local cv_maxsize = CV_RegisterVar({
+	name = "lb_ghost_maxsize",
+	flags = CV_NETVAR,
+	defaultvalue = 50000,
+	PossibleValue = { MIN = 0, MAX = 65535 }
+})
+
+local recorders = {}
+
 local EXP0 = FRACBITS+12
 local EXP1 = FRACBITS+8
 local EXP2 = FRACBITS+4
@@ -217,7 +226,7 @@ local function GetSimpleAnimalSequences(defs, skin)
 		end
 
 		if #int > 16 then
-			print("WARNING: Too many frames, animations will probably break")
+			print(string.format("\x82WARNING:\x80 SA skin %s has too many frames, animations will probably break", skin))
 			for i = #int, 17, -1 do
 				int[i] = nil
 			end
@@ -486,7 +495,13 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 	testspec(GS_ACROTRICK, tricked, ghost.lasttricked)
 	ghost.lasttricked = tricked
 
-	ghost.data = $..string.char(unpack(specials))..str
+	str = string.char(unpack(specials))..$
+	if #ghost.data + #str > cv_maxsize.value then
+		print("\x82WARNING:\x80 Ghost is too long! Stopping recording")
+		recorders[player] = nil
+	else
+		ghost.data = $..str
+	end
 end
 
 if RINGS then
@@ -506,8 +521,6 @@ addHook("PlayerThink", function(p)
 	maybering = nil
 end)
 end -- if RINGS
-
-local recorders = {}
 
 -- start recording ghost data for player
 local function StartRecording(player)
