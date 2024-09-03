@@ -18,39 +18,35 @@ local StringWriter = lb_string_writer
 local RINGS = VERSION == 2
 local open = RINGS and function(path, mode) return io.openlocal("client/"..path, mode) end or io.open
 
-local LEADERBOARD_FILE = "leaderboard.sav2"
-local LEADERBOARD_FILE_OLD = "leaderboard.coldstore.txt"
-local COLDSTORE_FILE = "leaderboard.coldstore.sav2"
 local LEADERBOARD_VERSION = 1
 local INDEX_VERSION = 1
 
+local reloadstore = false
+
 local cv_directory = CV_RegisterVar({
-	name = "lb_store_directory",
-	flags = CV_NETVAR,
-	defaultvalue = "my_leaderboard",
+	name = "lb_directory",
+	flags = CV_NETVAR|CV_CALL|CV_NOINIT,
+	defaultvalue = "",
+	func = function(cv)
+		reloadstore = true
+		print("Store changed to "..cv.string)
+		if consoleplayer and lines[0] then
+			print("Restart the map to load the store.")
+		end
+	end
 })
 
 -- Livestore are new records nad records loaded from leaderboard.txt file
-local LiveStore = {}
+local LiveStore
+
+-- name of loaded store
+local StoreName
 
 -- next available ID for records
-local NextID = 1
+local NextID
 
 -- which records are waiting to be written to the coldstore
-local Dirty = {}
-
--- parse score function
-local parseScore
-
-local MSK_SPEED = 0xF0
-local MSK_WEIGHT = 0xF
-local function stat_str(stat)
-	if stat then
-		return string.format("%d%d", (stat & MSK_SPEED) >> 4, stat & MSK_WEIGHT)
-	end
-
-	return "0"
-end
+local Dirty
 
 local function isSameRecord(a, b, modeSep)
 	if (a.flags & modeSep) ~= (b.flags & modeSep)
@@ -158,7 +154,7 @@ local function writeMapStore(mapnum, checksums)
 	end
 
 	if not next(checksums) then f = {} end
-	write_segmented(string.format("%s/%s.sav2", cv_directory.string, G_BuildMapName(mapnum)), table.concat(f))
+	write_segmented(string.format("%s/%s.sav2", StoreName, G_BuildMapName(mapnum)), table.concat(f))
 end
 rawset(_G, "lb_write_map_store", function(map)
 	writeMapStore(map, LiveStore[map])
@@ -167,8 +163,8 @@ end)
 local function writeColdStore(store)
 	local f = StringWriter()
 	f:writeliteral("COLDSTORE")
-	f:writestr(cv_directory.string)
-	for map, checksums in pairs(LiveStore) do
+	f:writestr(StoreName)
+	for map, checksums in pairs(store) do
 		f:writestr(G_BuildMapName(map))
 		local numchecksums = 0
 		for _ in pairs(checksums) do
@@ -200,13 +196,13 @@ local function writeIndex()
 		f:writenum(id)
 	end
 
-	local out = open(string.format("%s/%s.sav2", cv_directory.string, "index"), "wb")
+	local out = open(string.format("%s/%s.sav2", StoreName, "index"), "wb")
 	out:write(table.concat(f))
 	out:close()
 end
 
-local function dumpStoreToFile(lbname, store)
-	for mapid, checksums in pairs(store) do
+local function dumpStoreToFile()
+	for mapid, checksums in pairs(LiveStore) do
 		writeMapStore(mapid, checksums)
 	end
 	writeIndex()
@@ -332,6 +328,7 @@ rawset(_G, "lb_map_list", MapList)
 -- Construct the leaderboard table of the supplied mapid
 local function GetMapRecords(map, modeSep, checksum)
 	local mapRecords = {}
+	if not LiveStore then return mapRecords end
 
 	local store = LiveStore[map] and LiveStore[map][checksum or mapChecksum(map)]
 	if not store then return mapRecords end
@@ -355,6 +352,11 @@ rawset(_G, "lb_get_map_records", GetMapRecords)
 -- Save a record to the LiveStore and write to disk
 -- SaveRecord will replace the record holders previous record
 local function SaveRecord(score, map, modeSep)
+	if not LiveStore then
+		-- TODO perhaps a more prominent warning that nothing's being saved
+		print("Can't save records, please set a server directory! (lb_directory)")
+		return
+	end
 	LiveStore[map] = $ or {}
 	LiveStore[map][mapChecksum(map)] = $ or {}
 	local store = LiveStore[map][mapChecksum(map)]
@@ -487,7 +489,7 @@ local function loadColdStore(f)
 	if f:readliteral(9) ~= "COLDSTORE" then
 		error("Failed to read cold store: bad magic", 2)
 	end
-	local servername = f:readstr()
+	local directory = f:readstr()
 
 	while not f:empty() do
 		local mapnum = mapnumFromExtended(f:readstr())
@@ -506,43 +508,63 @@ local function loadColdStore(f)
 		end
 	end
 
-	return store
+	return store, directory
 end
 
 -- Read and parse a store file
-local function loadStoreFile()
-	print("Loading store")
-	local index = StringReader(open(string.format("%s/%s.sav2", cv_directory.string, "index"), "rb"))
+local function loadStoreFile(directory)
+	print("Loading store "..directory)
+	StoreName = directory
+	LiveStore = {}
+	Dirty = {}
+	NextID = 1
+
+	local index = StringReader(open(string.format("%s/%s.sav2", StoreName, "index"), "rb"))
+	if not index then
+		-- empty store, start a new one
+		return
+	end
 	if index:read8() > INDEX_VERSION then
 		error("Failed to load index (too new)", 2)
 	end
 	NextID = index:readnum()
 
-	local store = {}
 	while true do
 		local mapname = index:readstr()
 		if mapname == "" then break end
-		local filename = string.format("%s/%s.sav2", cv_directory.string, mapname)
+		local filename = string.format("%s/%s.sav2", StoreName, mapname)
 		local f = read_segmented(filename)
 		if f then
-			store[mapnumFromExtended(mapname)] = loadStore(f, filename)
+			LiveStore[mapnumFromExtended(mapname)] = loadStore(f, filename)
 		else
 			print("File not found for "..mapname)
 		end
 	end
 
-	Dirty = {}
 	while not index:empty() do
 		Dirty[index:readnum()] = true
 	end
+end
 
-	return store
+local function squishStore(store)
+	for map, checksums in pairs(store) do
+		for checksum, records in pairs(checksums) do
+			if not next(records) then
+				store[map][checksum] = nil
+			end
+		end
+		if not next(checksums) then
+			store[map] = nil
+		end
+	end
 end
 
 local function AddColdStoreBinary(str)
 	local f = StringReader(lb_base128_decode(str))
-	local store = loadColdStore(f)
+	local store, directory = loadColdStore(f)
+	loadStoreFile(directory)
 	mergeStore(store, true)
+	dumpStoreToFile()
 end
 rawset(_G, "lb_add_coldstore_binary", AddColdStoreBinary)
 
@@ -554,25 +576,24 @@ local function moveRecords(sourcemap, sourcesum, targetmap, targetsum, modeSep)
 		return 0
 	end
 
-	local moved = 0
-	if targetmap ~= -1 then
+	local delete = targetmap == -1
+
+	if not delete then
 		LiveStore[targetmap] = $ or {}
 		LiveStore[targetmap][targetsum] = $ or {}
-		for i, score in ipairs(LiveStore[sourcemap][sourcesum]) do
-			Dirty[score.id] = true
-			insertOrReplace(LiveStore[targetmap][targetsum], score, modeSep)
-			moved = $ + 1
-		end
-	else
-		moved = #LiveStore[sourcemap][sourcesum]
 	end
+	for i, score in ipairs(LiveStore[sourcemap][sourcesum]) do
+		Dirty[score.id] = true
+		if not delete then insertOrReplace(LiveStore[targetmap][targetsum], score, modeSep) end
+	end
+	local moved = #LiveStore[sourcemap][sourcesum]
 
 	-- Destroy the original table
 	LiveStore[sourcemap][sourcesum] = nil
 
 	if isserver then
 		writeMapStore(sourcemap, LiveStore[sourcemap])
-		if targetmap ~= -1 then writeMapStore(targetmap, LiveStore[targetmap]) end
+		if not delete then writeMapStore(targetmap, LiveStore[targetmap]) end
 		writeIndex()
 	end
 
@@ -612,6 +633,7 @@ local function netvars(net)
 				deleted[i] = true
 			end
 		end
+		squishStore(send)
 		local dat = writeColdStore(send)
 		net(dat, deleted)
 	else
@@ -624,7 +646,7 @@ addHook("PlayerJoin", function(p)
 	if netreceived and #consoleplayer == p then
 		local newstore = loadColdStore(StringReader(netreceived))
 		mergeStore(newstore, false, netdeleted)
-		dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
+		dumpStoreToFile()
 	end
 	netreceived = nil
 	netdeleted = nil
@@ -651,10 +673,14 @@ COM_AddCommand("lb_write_coldstore", function(player, filename)
 		end
 	end
 
+	squishStore(store)
+
 	local dat = writeColdStore(store)
-	local f = open(COLDSTORE_FILE, "wb")
+	--[[
+	local f = open("coldstore.sav2", "wb")
 	f:write(dat)
 	f:close()
+	--]]
 
 	-- B-B-BUT WHAT ABOUT PLAYER NAMES?
 	-- right now we use base128 encoding, which doesn't have ] in its character set so that's not an issue
@@ -692,7 +718,7 @@ end, COM_LOCAL)
 
 if not RINGS then
 COM_AddCommand("lb_convert_to_binary", function(player, filename)
-	filename = $ or LEADERBOARD_FILE_OLD
+	filename = $ or "leaderboard.coldstore.txt"
 	local f = open(filename)
 	if not f then
 		print("Can't open "..filename)
@@ -712,20 +738,14 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 	f:close()
 	Dirty = {}
 
-	dumpStoreToFile(LEADERBOARD_FILE, LiveStore)
+	dumpStoreToFile()
 end, COM_LOCAL)
 end
 
--- Load the livestore
-if RINGS then
-	-- maps are most likely not loaded yet, so we can't get their numbers
-	-- gotta wait until the game starts
-	local loaded = false
-	local function loadit()
-		if not loaded then loaded = true; LiveStore = loadStoreFile() end
-	end
-	addHook("MapChange", loadit)
-	addHook("NetVars", loadit)
-else
-	LiveStore = loadStoreFile()
+-- wait until netvars/mapchange so the savegame has a chance to set cv_directory
+-- also in RR, maps are most likely not loaded yet, so we can't get their numbers
+local function loadit()
+	if reloadstore then reloadstore = false; loadStoreFile(cv_directory.string) end
 end
+addHook("MapChange", loadit)
+addHook("NetVars", loadit)

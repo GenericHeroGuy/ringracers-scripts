@@ -221,6 +221,7 @@ local reader = { __index = {
 
 rawset(_G, "lb_string_reader", function(data)
 	local str = data
+	if not str then return end
 	if type(data) == "userdata" then
 		-- oh it's a file!
 		str = data:read("*a")
