@@ -445,7 +445,7 @@ local function modeToString(mode)
 	return modestr
 end
 
-COM_AddCommand("records", function(_, mapid)
+COM_AddCommand("records", function(player, mapid)
 	local mapnum = gamemap
 	local checksum
 
@@ -487,6 +487,8 @@ COM_AddCommand("records", function(_, mapid)
 		print("\x85UNKNOWN MAP")
 	end
 
+	local admin = player == server or IsPlayerAdmin(player)
+
 	for mode, records in pairs(mapRecords) do
 		print("")
 		print(modeToString(mode))
@@ -498,8 +500,8 @@ COM_AddCommand("records", function(_, mapid)
 				table.insert(names, (SG_Color2Chat and SG_Color2Chat[p.color] or "")..p.name)
 			end
 			print(string.format(
-				"[%5d] %2d %-21s \x89%s"..(mode and " \x80%s" or ""),
-				score.id,
+				(admin and "[%5d] " or "%s").."%2d %-21s \x89%s"..(mode and " \x80%s" or ""),
+				admin and score.id or "",
 				i,
 				names[1],
 				ticsToTime(score["time"]),
@@ -507,7 +509,7 @@ COM_AddCommand("records", function(_, mapid)
 			))
 			for i = 2, #names do
 				print(string.format(
-					"           & %s",
+					(admin and "        " or "").."   & %s",
 					names[i]
 				))
 			end
@@ -570,7 +572,7 @@ COM_AddCommand("scroll", function(player)
 	if not doyoudare(player) then return end
 
 	if drawState == DS_DEFAULT then
-		scroll_to(player)
+		scroll_to()
 	else
 		drawState = DS_DEFAULT
 	end
@@ -702,18 +704,13 @@ COM_AddCommand("lb_move_records", function(player, from, to)
 			"\x82Usage:\x80 lb_move_records <from> <to>\n"..
 			"\x82Summary:\x80 Move records from one map to another.\n"..
 			"If no checksum is supplied for <to>, the loaded map's checksum is used.\n"..
-			"To\x85 DELETE\x80 records, write /dev/null in <to>.\n"..
-			"\x82Hint:\x80 Use lb_known_maps to find checksums"
+			(RINGS and "" or "\x82Hint:\x80 Use lb_known_maps to find checksums")
 		)
 		return
 	end
 
 	local sourcemap, sourcesum = mapnumFromExtended(from)
 	local targetmap, targetsum = mapnumFromExtended(to)
-
-	if to == "/dev/null" then
-		targetmap = -1
-	end
 
 	if not sourcemap then
 		CONS_Printf(player, string.format("error: invalid map %s", from:upper()))
@@ -732,15 +729,13 @@ COM_AddCommand("lb_move_records", function(player, from, to)
 		return
 	end
 
-	if targetmap ~= -1 then
-		if targetsum == nil then targetsum = mapChecksum(targetmap) end
-		if targetsum == false then
-			CONS_Printf(player, string.format("error: invalid checksum for %s", to:upper()))
-			return
-		elseif not targetsum then
-			CONS_Printf(player, string.format("error: %s is not loaded; provide checksum to continue", to:upper()))
-			return
-		end
+	if targetsum == nil then targetsum = mapChecksum(targetmap) end
+	if targetsum == false then
+		CONS_Printf(player, string.format("error: invalid checksum for %s", to:upper()))
+		return
+	elseif not targetsum then
+		CONS_Printf(player, string.format("error: %s is not loaded; provide checksum to continue", to:upper()))
+		return
 	end
 
 	local recordCount = MoveRecords(sourcemap, sourcesum, targetmap, targetsum, ST_SEP)
@@ -752,6 +747,43 @@ COM_AddCommand("lb_move_records", function(player, from, to)
 			recordCount,
 			from,
 			to
+		)
+	)
+end, COM_ADMIN)
+
+COM_AddCommand("lb_delete_records", function(player, from)
+	if not from then
+		CONS_Printf(player,
+			"\x82Usage:\x80 lb_delete_records <from>\n"..
+			"\x82Summary:\x80 Deletes records from the given map.\n"..
+			(RINGS and "" or "\x82Hint:\x80 Use lb_known_maps to find checksums")
+		)
+		return
+	end
+
+	local sourcemap, sourcesum = mapnumFromExtended(from)
+
+	if not sourcemap then
+		CONS_Printf(player, string.format("error: invalid map %s", from:upper()))
+		return
+	end
+
+	if RINGS then
+		sourcesum = mapChecksum(sourcemap)
+	end
+	if not sourcesum then
+		CONS_Printf(player, string.format("error: %s checksum for %s", sourcesum == false and "invalid" or "missing", from:upper()))
+		return
+	end
+
+	local recordCount = MoveRecords(sourcemap, sourcesum, -1, nil, ST_SEP)
+
+	CONS_Printf(
+		player,
+		string.format(
+			"Deleted %d records from \x82%s",
+			recordCount,
+			from
 		)
 	)
 end, COM_ADMIN)
@@ -1232,13 +1264,21 @@ function cachePatches(v)
 	end
 end
 
--- Find location of player and scroll to it
-function scroll_to(player)
+-- Find location of current player(s) and scroll to it
+function scroll_to()
 	local m = ScoreTable or {}
 
 	scrollToPos = 2
+	local gamers = getGamers()
 	for pos, score in ipairs(m) do
-		if player.name == score["name"] then
+		local gotem = true -- the sheer disappointment when i found out "continue 2" doesn't work
+		for i, p in ipairs(gamers) do
+			if p.name ~= score.players[i].name then
+				gotem = false
+				break
+			end
+		end
+		if gotem then
 			scrollToPos = max(2, pos - 1)
 			break
 		end
@@ -1356,7 +1396,7 @@ local function saveTime(player)
 			FlashTics = leveltime + TICRATE * 3
 			FlashRate = 3
 			FlashVFlags = RedFlash
-			scroll_to(player)
+			scroll_to()
 			return
 		end
 	end
@@ -1377,7 +1417,7 @@ local function saveTime(player)
 	ScoreTable = MapRecords[ST_SEP & Flags]
 
 	-- Scroll the gui to the player entry
-	scroll_to(player)
+	scroll_to()
 end
 
 -- DEBUGGING
@@ -1418,6 +1458,8 @@ local function removePlayerItems(player)
 	end
 end
 
+local minirankings = true
+
 local function think()
 	if nextMap then changeMap() end
 
@@ -1425,7 +1467,10 @@ local function think()
 	local leveltime = leveltime
 
 	if disable then
-		hud.enable("minirankings")
+		if not minirankings then
+			hud.enable("minirankings")
+			minirankings = true
+		end
 		if cv_antiafk.value and not G_BattleGametype() then
 			if not singleplayer() then
 				for p in players.iterate do
@@ -1475,6 +1520,7 @@ local function think()
 	local gamers = getGamers()
 
 	hud.disable("minirankings")
+	minirankings = false
 
 	if leveltime < START_TIME then
 		-- Help message

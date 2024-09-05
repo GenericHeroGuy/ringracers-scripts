@@ -255,13 +255,13 @@ local function startReceiver(data, ptype, callback)
 end
 
 local cv_bandwidth = CV_RegisterVar({
-	name = "lb_trn_bandwidth",
+	name = "lb_comms_bandwidth",
 	defaultvalue = 192,
 	possiblevalue = { MIN = 16, MAX = 247 }
 })
 
 local cv_timeout = CV_RegisterVar({
-	name = "lb_trn_timeout",
+	name = "lb_comms_timeout",
 	defaultvalue = TICRATE/3,
 	possiblevalue = { MIN = TICRATE/10, MAX = TICRATE }
 })
@@ -316,6 +316,7 @@ local function RequestGhosts(id, callback)
 end
 rawset(_G, "lb_request_ghosts", RequestGhosts)
 
+--[[
 COM_AddCommand("testtransfer", function(p, data)
 	local file, err = io.open("input.png", "rb")
 	if not file then return print(err) end
@@ -323,13 +324,17 @@ COM_AddCommand("testtransfer", function(p, data)
 	file:close()
 	startTransfer(data, "start", function(ok) print("done "..tostring(ok)) end)
 end, COM_LOCAL)
+--]]
 
 hud.add(function(v, p)
 	for i, tx in ipairs(myconnections) do
-		local str = fmt("%s: %d", tostring(tx.state), #tx.data)
+		local str = fmt("%s: ", tostring(tx.state))
 		if tx.finallength then
-			str = str..fmt("/%d", tx.finallength)
+			str = str..fmt("%d%%", (#tx.data*100)/tx.finallength)
+		else
+			str = str..fmt("%d", #tx.data)
 		end
-		v.drawString(32, 32+i*8, str)
+		v.drawString(0, 200-i*4, str, V_SNAPTOBOTTOM|V_SNAPTOLEFT|V_ALLOWLOWERCASE|V_HUDTRANSHALF, "small")
+		break
 	end
 end)

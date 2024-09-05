@@ -154,7 +154,7 @@ local function writeMapStore(mapnum, checksums)
 	end
 
 	if not next(checksums) then f = {} end
-	write_segmented(string.format("%s/%s.sav2", StoreName, G_BuildMapName(mapnum)), table.concat(f))
+	write_segmented(string.format("Leaderboard/%s/%s.sav2", StoreName, G_BuildMapName(mapnum)), table.concat(f))
 end
 rawset(_G, "lb_write_map_store", function(map)
 	writeMapStore(map, LiveStore[map])
@@ -196,7 +196,7 @@ local function writeIndex()
 		f:writenum(id)
 	end
 
-	local out = open(string.format("%s/%s.sav2", StoreName, "index"), "wb")
+	local out = open(string.format("Leaderboard/%s/%s.sav2", StoreName, "index"), "wb")
 	out:write(table.concat(f))
 	out:close()
 end
@@ -367,7 +367,7 @@ local function SaveRecord(score, map, modeSep)
 	end
 	Dirty[score.id] = true
 
-	print("Saving score"..(inserted and " ("..score.id..")" or ""))
+	print("Saving score ("..score.id..")")
 	if isserver then
 		writeMapStore(map, LiveStore[map])
 		writeIndex()
@@ -519,7 +519,7 @@ local function loadStoreFile(directory)
 	Dirty = {}
 	NextID = 1
 
-	local index = StringReader(open(string.format("%s/%s.sav2", StoreName, "index"), "rb"))
+	local index = StringReader(open(string.format("Leaderboard/%s/%s.sav2", StoreName, "index"), "rb"))
 	if not index then
 		-- empty store, start a new one
 		return
@@ -532,7 +532,7 @@ local function loadStoreFile(directory)
 	while true do
 		local mapname = index:readstr()
 		if mapname == "" then break end
-		local filename = string.format("%s/%s.sav2", StoreName, mapname)
+		local filename = string.format("Leaderboard/%s/%s.sav2", StoreName, mapname)
 		local f = read_segmented(filename)
 		if f then
 			LiveStore[mapnumFromExtended(mapname)] = loadStore(f, filename)
@@ -560,6 +560,7 @@ local function squishStore(store)
 end
 
 local function AddColdStoreBinary(str)
+	if replayplayback then return end
 	local f = StringReader(lb_base128_decode(str))
 	local store, directory = loadColdStore(f)
 	loadStoreFile(directory)
@@ -603,6 +604,7 @@ rawset(_G, "lb_move_records", moveRecords)
 
 local netreceived, netdeleted
 local function netvars(net)
+	if replayplayback then return end
 	NextID = net($)
 	if isserver then
 		print("sending")
