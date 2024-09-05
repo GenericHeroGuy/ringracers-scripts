@@ -320,6 +320,7 @@ local function ReadFakeFrame(framenum, skin)
 end
 
 -- ghost specials
+--local GS_NOP = 0x80
 local GS_SPARKS0 = 0x81 -- RR gray sparks
 local GS_NOSPARKS = 0x82 -- removes drift sparks
 local GS_SPARKS1 = 0x83 -- kart blue sparks, RR yellow sparks
@@ -331,7 +332,7 @@ local GS_BOOSTFLAME = 0x88 -- boostflame (formerly sneaker boost)
 local GS_NOITEM = 0x89 -- lost item
 local GS_ROULETTE = 0x8a -- started item roulette
 local GS_GETITEM = 0x8b -- rolled an item
-local GS_FASTLINES = 0x8c -- go fast
+local GS_USESNEAKER = 0x8c -- combo of BOOSTFLAME and NOITEM
 local GS_RESPAWN = 0x8d -- respawn lasers AKA lightsnake
 local GS_SLIPTIDE = 0x8e -- you're slippin' an' tidin'!
 local GS_USERING = 0x8f -- yummy!
@@ -339,8 +340,11 @@ local GS_SPINDASH = 0x90 -- RR charging spindash
 local GS_WAVEDASH = 0x91 -- RR wavedash charged
 local GS_FASTFALL = 0x92 -- RR fastfall
 local GS_TRICKED = 0x93 -- CATHOLOCISM BLAST!
-local GS_DEATH = 0x94 -- RR death sprite (i'm outta fakestates so...)
-local GS_ACROTRICK = 0x95 -- acrobasics trick spin
+local GS_TRICKCHARGE = 0x94 -- RR trick charge
+local GS_DEATH = 0x95 -- RR death sprite (i'm outta fakestates so...)
+local GS_ACROTRICK = 0x96 -- acrobasics trick spin
+
+local GSB_FASTLINES = 0x40 -- go fast
 
 local tins = table.insert
 local pickupring = {}
@@ -431,7 +435,7 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 		fastlines = (ks[k_sneakertimer] or ks[k_driftboost] or ks[k_startboost])
 		            and player.speed > 0
 	end
-	testspec(GS_FASTLINES, fastlines, ghost.lastfastlines)
+	local dofastlines = (fastlines and not ghost.lastfastlines) or (not fastlines and ghost.lastfastlines)
 	ghost.lastfastlines = fastlines
 
 	local respawn
@@ -452,7 +456,17 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 	if havesneaker and not ghost.havesneaker then
 		tins(specials, GS_GETITEM)
 	elseif not havesneaker and ghost.havesneaker then
-		tins(specials, GS_NOITEM)
+		local combined = false
+		for i, v in ipairs(specials) do
+			if v == GS_BOOSTFLAME then
+				specials[i] = GS_USESNEAKER
+				combined = true
+				break
+			end
+		end
+		if not combined then
+			tins(specials, GS_NOITEM)
+		end
 	end
 	ghost.lastroulette = roulette
 	ghost.havesneaker = havesneaker
@@ -476,6 +490,10 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 		testspec(GS_TRICKED, trick, ghost.lasttrickpanel)
 		ghost.lasttrickpanel = trick
 
+		local trickcharge = player.trickcharge
+		testspec(GS_TRICKCHARGE, trickcharge, ghost.lasttrickcharge)
+		ghost.lasttrickcharge = trickcharge
+
 		local death = player.mo.state == S_KART_DEAD
 		testspec(GS_DEATH, death, ghost.lastdeath)
 		ghost.lastdeath = death
@@ -494,6 +512,14 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 	local tricked = player.hastricked
 	testspec(GS_ACROTRICK, tricked, ghost.lasttricked)
 	ghost.lasttricked = tricked
+
+	if dofastlines then
+		if specials[1] then
+			specials[1] = $ | GSB_FASTLINES
+		else
+			tins(specials, 0x80 | GSB_FASTLINES)
+		end
+	end
 
 	str = string.char(unpack(specials))..$
 	if #ghost.data + #str > cv_maxsize.value then
@@ -538,6 +564,7 @@ local function StartRecording(player)
 		lastsliptide = false,
 		lastspindash = 0,
 		lasttrickpanel = 0,
+		lasttrickcharge = false,
 		lastdeath = false,
 		lasttricked = false,
 
@@ -697,6 +724,8 @@ local function PlayGhost(record)
 			fastfalling = false,
 			fastfallwave = false,
 			tricking = false,
+			trickcharged = false,
+			trickaura = false,
 			dead = false,
 			acrotrick = false,
 		}, { __index = do error("no", 2) end, __newindex = do error("no", 2) end })
@@ -933,13 +962,13 @@ ghoststate.sprite = SPR_PLAY
 ghoststate.tics = -1 -- easy to forget
 
 local booleans = {
-	[GS_FASTLINES] = "fastlines",
 	[GS_RESPAWN] = "respawning",
 	[GS_SLIPTIDE] = "sliptiding",
 	[GS_SPINDASH] = "spindashing",
 	[GS_WAVEDASH] = "wavedashing",
 	[GS_FASTFALL] = "fastfalling",
 	[GS_TRICKED] = "tricking",
+	[GS_TRICKCHARGE] = "trickcharged",
 	[GS_DEATH] = "dead",
 	[GS_ACROTRICK] = "acrotrick",
 }
@@ -980,30 +1009,38 @@ addHook("ThinkFrame", function()
 		end
 		if not r.file:empty() then
 			local flags
-			repeat -- for all the specials
+			while true do -- for all the specials
 				flags = r.file:read8()
+				if not (flags & 0x80) then break end
+				if flags & GSB_FASTLINES then
+					r.fastlines = not $
+					flags = $ & ~GSB_FASTLINES
+				end
 				if flags >= GS_SPARKS0 and flags <= GS_SPARKS4 then
 					r.driftspark = flags - GS_NOSPARKS
 				elseif flags == GS_DRIFTBOOST then
 					r.drifthilite = 0
 					r.drifthilitecolor = r.driftspark
 					r.driftspark = 0
-				elseif flags == GS_BOOSTFLAME then
+				elseif flags == GS_BOOSTFLAME or flags == GS_USESNEAKER then
 					if not (r.boostflame and r.boostflame.valid) then
 						r.boostflame = P_SpawnMobj(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
 						r.boostflame.scale = r.mo.scale
 					end
 					r.boostflame.state = S_BOOSTFLAME
 					r.boostflame.frame = $ | FF_TRANS40
+					if flags == GS_USESNEAKER then
+						r.hasitem = 0
+					end
 				elseif flags == GS_USERING then
 					SpawnRing(r)
 				elseif flags >= GS_NOITEM and flags <= GS_GETITEM then
 					r.hasitem = flags - GS_NOITEM
-				elseif flags & 0x80 then
+				elseif flags ~= 0x80 then
 					local var = booleans[flags]
 					r[var] = not $
 				end
-			until flags & 0x80 == 0
+			end
 
 			local dx = (flags & 0x10) and BloatToFixed(r.file:read8())
 			local dy = (flags & 0x10) and BloatToFixed(r.file:read8())
@@ -1078,9 +1115,26 @@ addHook("ThinkFrame", function()
 				if dir then -- drawangle offset for drifting
 					r.mo.angle = $ + ANGLE_45*dir
 				end
+
 				if r.tricking then
 					-- i might have to rethink frame specials
 					r.mo.angle = $ + (ANGLE_22h*(leveltime%16))
+				end
+
+				if r.trickcharged then
+					local aura = r.trickaura
+					if not aura then
+						aura = SpawnLocal(r.mo.x, r.mo.y, r.mo.z + r.mo.height/2, MT_THOK)
+						aura.state = S_CHARGEAURA
+						aura.renderflags = RF_PAPERSPRITE|RF_FULLBRIGHT|RF_ADD
+						r.trickaura = aura
+					end
+					P_MoveOrigin(aura, r.mo.x, r.mo.y, r.mo.z + r.mo.height/2)
+					aura.frame = (leveltime/2)%5
+					aura.angle = leveltime*ANG10
+				elseif r.trickaura then
+					P_RemoveMobj(r.trickaura)
+					r.trickaura = false
 				end
 
 				if r.spindashing then
