@@ -1420,13 +1420,14 @@ local function saveTime(player)
 	scroll_to()
 end
 
--- DEBUGGING
+--[[ DEBUGGING
 local function saveLeaderboard(player, time)
 	TimeFinished = tonumber(time or player.realtime)
 	splits = {1000, 2000, 3000}
 	saveTime(player)
 end
 COM_AddCommand("save", saveLeaderboard)
+--]]
 
 local function regLap(player)
 	if player.laps > prevLap and TimeFinished == 0 then

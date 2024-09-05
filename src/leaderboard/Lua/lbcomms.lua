@@ -77,7 +77,7 @@ local packets = {
 			local target = data:byte(1)
 			local length = tonumber(data:sub(2))
 			if #consoleplayer == target then
-				print("is for me?")
+				--print("is for me?")
 				local rx = {
 					data = "",
 					state = "receiving",

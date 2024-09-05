@@ -249,25 +249,25 @@ local function mergeStore(other, iscold, deletelist)
 			LiveStore[ot.map][ot.checksum] = $ or {}
 			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
 			LiveStore[my.map][my.checksum][my.i] = false
-			print(string.format("move %d %d", ot.map, id))
+			--print(string.format("move %d %d", ot.map, id))
 		elseif my then
 			if iscold or recordsIdentical(my.rec, ot.rec) then
 				-- passthrough
-				print(string.format("passthrough %d %d", my.map, id))
+				--print(string.format("passthrough %d %d", my.map, id))
 			else
 				-- overwrite (this wipes the ghost, other rec has empty ghost)
 				LiveStore[my.map][my.checksum][my.i] = ot.rec
-				print(string.format("overwrite %d %d", my.map, id))
+				--print(string.format("overwrite %d %d", my.map, id))
 			end
 		elseif not Dirty[id] then
 			-- add
 			LiveStore[ot.map] = $ or {}
 			LiveStore[ot.map][ot.checksum] = $ or {}
 			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
-			print(string.format("add %d %d", ot.map, id))
+			--print(string.format("add %d %d", ot.map, id))
 		else
 			-- if it's not in livestore and is in coldstore, but it's marked dirty, then it's a deleted cold record
-			print(string.format("ignoring %d %d", ot.map, id))
+			--print(string.format("ignoring %d %d", ot.map, id))
 		end
 	end
 
@@ -278,6 +278,7 @@ local function mergeStore(other, iscold, deletelist)
 		if (iscold and not (ot or Dirty[id])) or (deletelist and deletelist[id]) then
 			-- delete
 			LiveStore[my.map][my.checksum][my.i] = false
+			--[[
 			print(string.format("delete %d %d", my.map, id))
 			if not ot then
 				print("not in other")
@@ -288,6 +289,7 @@ local function mergeStore(other, iscold, deletelist)
 			if deletelist and deletelist[id] then
 				print("deletelist")
 			end
+			--]]
 		end
 	end
 
@@ -607,7 +609,7 @@ local function netvars(net)
 	if replayplayback then return end
 	NextID = net($)
 	if isserver then
-		print("sending")
+		--print("sending")
 		local send = {}
 		local highest = 0
 		local byid = {}
@@ -618,7 +620,7 @@ local function netvars(net)
 				for _, record in ipairs(records) do
 					if Dirty[record.id] then
 						table.insert(send[map][checksum], record)
-						print(record.id)
+						--print(record.id)
 					end
 					byid[record.id] = record
 					highest = max($, record.id)

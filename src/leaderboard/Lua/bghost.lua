@@ -1226,7 +1226,7 @@ addHook("ThinkFrame", function()
 				r.mo.angle = $ + (ANG30*(leveltime%12))
 			end
 		else
-			print("Finished")
+			--print("Finished")
 			StopPlaying(r)
 			if not ghostwatching then
 				consoleplayer.awayviewtics = 0
