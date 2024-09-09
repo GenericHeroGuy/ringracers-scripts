@@ -10,13 +10,19 @@ rawset(_G, "lb_score_t", function(flags, time, splits, players, id)
 	}
 end)
 
-rawset(_G, "lb_player_t", function(name, skin, color, stat, ghost)
+rawset(_G, "lb_player_t", function(name, skin, color, stat)
 	return {
 		["name"]   = name,
 		["skin"]   = skin,
 		["color"]  = color,
 		["stat"]  = stat,
-		["ghost"] = ghost,
+	}
+end)
+
+rawset(_G, "lb_ghost_t", function(data, startofs)
+	return {
+		["data"]     = data,
+		["startofs"] = startofs,
 	}
 end)
 

@@ -14,6 +14,7 @@ local mapnumFromExtended = lb_mapnum_from_extended
 local StringReader = lb_string_reader
 local drawNum = lb_draw_num
 local getThrowDir = lb_throw_dir
+local ghost_t = lb_ghost_t
 
 -- browser.lua
 local InitBrowser = InitBrowser
@@ -25,7 +26,7 @@ local GetMapRecords = lb_get_map_records
 local SaveRecord = lb_save_record
 local MapList = lb_map_list
 local MoveRecords = lb_move_records
-local WriteMapStore = lb_write_map_store
+local WriteGhost = lb_write_ghost
 
 -- bghost.lua
 local GhostStartRecording = lb_ghost_start_recording
@@ -820,12 +821,11 @@ addHook("MapLoad", function()
 					data = StringReader(data)
 					while not data:empty() do
 						local i = data:read8()
-						ghosts[i] = data:readlstr()
+						local startofs = data:readnum()
+						local gdata = data:readlstr()
+						ghosts[i] = ghost_t(gdata, startofs)
 					end
-					for i, p in ipairs(score.players) do
-						p.ghost = ghosts[i]
-					end
-					WriteMapStore(map)
+					WriteGhost(score, ghosts)
 				end)
 			end
 		end
@@ -1361,23 +1361,29 @@ local function saveTime(player)
 
 	ScoreTable = $ or {}
 
-	local extraflags = cv_ghosts.value and F_HASGHOST or 0
+	local extraflags = 0
 
 	local players = {}
+	local ghosts = {}
 	local gamers = getGamers()
 	for _, p in ipairs(gamers) do
 		local pskin = skins[p.mo.skin]
 		local ghost = GhostIsRecording(p) and GhostStopRecording(p) or nil
-		if not ghost then
-			extraflags = $ & ~F_HASGHOST
+		if ghost and ghosts then
+			table.insert(ghosts, ghost)
+		else
+			ghosts = nil
 		end
 		table.insert(players, player_t(
 			p.name,
 			p.mo.skin,
 			p.skincolor,
-			stat_t(p.HMRs or pskin.kartspeed, p.HMRw or pskin.kartweight),
-			ghost
+			stat_t(p.HMRs or pskin.kartspeed, p.HMRw or pskin.kartweight)
 		))
+	end
+
+	if #ghosts then
+		extraflags = $ | F_HASGHOST
 	end
 
 	local newscore = score_t(
@@ -1402,7 +1408,7 @@ local function saveTime(player)
 	end
 
 	-- Save the record
-	SaveRecord(newscore, gamemap, ST_SEP)
+	SaveRecord(newscore, gamemap, ST_SEP, ghosts)
 
 	-- Set players text flash and play chime sfx
 	S_StartSound(nil, 130)

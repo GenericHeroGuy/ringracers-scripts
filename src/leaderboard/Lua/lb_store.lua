@@ -12,6 +12,7 @@ local mapnumFromExtended = lb_mapnum_from_extended
 local ticsToTime = lb_TicsToTime
 local StringReader = lb_string_reader
 local StringWriter = lb_string_writer
+local ghost_t = lb_ghost_t
 
 ----------------------------
 
@@ -19,7 +20,7 @@ local RINGS = VERSION == 2
 local open = RINGS and function(path, mode) return io.openlocal("client/"..path, mode) end or io.open
 
 local LEADERBOARD_VERSION = 1
-local INDEX_VERSION = 1
+local GHOST_VERSION = 1
 
 local reloadstore = false
 
@@ -118,7 +119,7 @@ local function read_segmented(filename)
 	return #data and StringReader(data) or nil
 end
 
-local function writeRecord(f, record, withghosts)
+local function writeRecord(f, record)
 	f:writenum(record.id)
 	f:writenum(record.flags)
 	f:writenum(record.time)
@@ -132,81 +133,107 @@ local function writeRecord(f, record, withghosts)
 		f:writestr(p.skin)
 		f:write8(p.color)
 		f:write8(p.stat)
-		f:writelstr(withghosts and p.ghost or "")
 	end
 end
 
-local function writeMapStore(mapnum, checksums)
+local function writeCount(f, table)
+	local count = 0
+	for _ in pairs(table) do
+		count = $ + 1
+	end
+	f:writenum(count)
+end
+
+local function writeMapStore(f, store)
+	writeCount(f, store)
+	for map, checksums in pairs(store) do
+		f:writestr(G_BuildMapName(map))
+		writeCount(f, checksums)
+		for checksum, records in pairs(checksums) do
+			f:write16(tonumber(checksum, 16))
+			f:writenum(#records)
+			for _, record in ipairs(records) do
+				writeRecord(f, record)
+			end
+		end
+	end
+end
+
+local function writeGhost(record, ghosts)
+	local f = StringWriter()
+	f:writeliteral("GHOST")
+	f:write8(GHOST_VERSION)
+
+	f:write8(#ghosts)
+	for _, ghost in ipairs(ghosts) do
+		f:writenum(ghost.startofs)
+		f:writelstr(ghost.data)
+	end
+
+	local out = open(string.format("Leaderboard/%s/g%d.sav2", StoreName, record.id), "wb")
+	out:write(table.concat(f))
+	out:close()
+end
+rawset(_G, "lb_write_ghost", writeGhost)
+
+local function readGhost(record)
+	local f = StringReader(open(string.format("Leaderboard/%s/g%d.sav2", StoreName, record.id), "rb"))
+	if not f then return nil end
+
+	if f:readliteral(5) ~= "GHOST" then
+		--error("Failed to read ghost: bad magic", 2)
+		return nil
+	end
+	local version = f:read8()
+	if version > GHOST_VERSION then
+		--error(string.format("Failed to read ghost: version %d not supported (highest is %d)", version, GHOST_VERSION), 2)
+		return nil
+	end
+
+	local ghosts = {}
+	local numplayers = f:read8()
+	for i = 1, numplayers do
+		local startofs = f:readnum()
+		local data = f:readlstr()
+		ghosts[i] = ghost_t(data, startofs)
+	end
+
+	return ghosts
+end
+rawset(_G, "lb_read_ghost", readGhost)
+
+-- can't delete a file, so best we can do is truncate it
+local function deleteGhost(record)
+	local f = open(string.format("Leaderboard/%s/g%d.sav2", StoreName, record.id), "rb")
+	if f then
+		f:close()
+		f = open(string.format("Leaderboard/%s/g%d.sav2", StoreName, record.id), "wb")
+		f:close()
+	end
+end
+
+local function writeColdStore(store)
+	local f = StringWriter()
+	f:writestr(StoreName)
+	writeMapStore(f, store)
+	return table.concat(f)
+end
+
+local function dumpStoreToFile()
 	local f = StringWriter()
 	f:writeliteral("LEADERBOARD")
 	f:write8(LEADERBOARD_VERSION)
 
-	local numchecksums = 0
-	for _ in pairs(checksums) do
-		numchecksums = $ + 1
-	end
-	f:writenum(numchecksums)
-	for checksum, records in pairs(checksums) do
-		f:writestr(checksum)
-		f:writenum(#records)
-		for _, record in ipairs(records) do
-			writeRecord(f, record, true)
-		end
-	end
-
-	if not next(checksums) then f = {} end
-	write_segmented(string.format("Leaderboard/%s/%s.sav2", StoreName, G_BuildMapName(mapnum)), table.concat(f))
-end
-rawset(_G, "lb_write_map_store", function(map)
-	writeMapStore(map, LiveStore[map])
-end)
-
-local function writeColdStore(store)
-	local f = StringWriter()
-	f:writeliteral("COLDSTORE")
-	f:writestr(StoreName)
-	for map, checksums in pairs(store) do
-		f:writestr(G_BuildMapName(map))
-		local numchecksums = 0
-		for _ in pairs(checksums) do
-			numchecksums = $ + 1
-		end
-		f:writenum(numchecksums)
-		for checksum, records in pairs(checksums)
-			f:writestr(checksum)
-			f:writenum(#records)
-			for _, record in ipairs(records) do
-				writeRecord(f, record, false)
-			end
-		end
-	end
-	return table.concat(f)
-end
-
-local function writeIndex()
-	local f = StringWriter()
-	f:write8(INDEX_VERSION)
 	f:writenum(NextID)
 
-	for mapid, checksums in pairs(LiveStore) do
-		if next(checksums) then f:writestr(G_BuildMapName(mapid)) end
-	end
-	f:writestr("")
-
+	writeCount(f, Dirty)
 	for id in pairs(Dirty) do
 		f:writenum(id)
 	end
 
-	local out = open(string.format("Leaderboard/%s/%s.sav2", StoreName, "index"), "wb")
-	out:write(table.concat(f))
-	out:close()
-end
+	writeMapStore(f, LiveStore)
 
-local function dumpStoreToFile()
-	for mapid, checksums in pairs(LiveStore) do
-		writeMapStore(mapid, checksums)
-	end
-	writeIndex()
+	write_segmented(string.format("Leaderboard/%s/store.sav2", StoreName), table.concat(f))
 end
 
 local function recordsIdentical(a, b)
@@ -228,7 +255,6 @@ local function mergeStore(other, deletelist)
 		for checksum, records in pairs(checksums)
 			for i, record in ipairs(records) do
 				my_mapforid[record.id] = { map = map, rec = record, checksum = checksum, i = i }
-				NextID = max($, record.id+1)
 			end
 		end
 	end
@@ -237,7 +263,6 @@ local function mergeStore(other, deletelist)
 		for checksum, records in pairs(checksums) do
 			for i, record in ipairs(records) do
 				other_mapforid[record.id] = { map = map, rec = record, checksum = checksum }
-				NextID = max($, record.id+1)
 			end
 		end
 	end
@@ -252,6 +277,7 @@ local function mergeStore(other, deletelist)
 			if my then
 				LiveStore[my.map][my.checksum][my.i] = false
 				writes[my.map] = true
+				deleteGhost(my.rec)
 			end
 			--print(string.format("delete %d", id))
 		elseif not my and ot then
@@ -269,6 +295,7 @@ local function mergeStore(other, deletelist)
 			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
 			writes[my.map] = true
 			writes[ot.map] = true
+			deleteGhost(my.rec)
 			--print(string.format("overwrite %d %d", my.map, id))
 		else
 			--print(string.format("passthrough %d %d", ot.map, id))
@@ -288,11 +315,9 @@ local function mergeStore(other, deletelist)
 				LiveStore[map][checksum] = nil
 			end
 		end
-		-- then write the store
-		writeMapStore(map, LiveStore[map])
 	end
 	Dirty = {} -- you won't be needing this anymore
-	writeIndex()
+	dumpStoreToFile()
 end
 
 -- GLOBAL
@@ -337,7 +362,7 @@ rawset(_G, "lb_get_map_records", GetMapRecords)
 -- GLOBAL
 -- Save a record to the LiveStore and write to disk
 -- SaveRecord will replace the record holders previous record
-local function SaveRecord(score, map, modeSep)
+local function SaveRecord(score, map, modeSep, ghosts)
 	if not LiveStore then
 		-- TODO perhaps a more prominent warning that nothing's being saved
 		print("Can't save records, please set a server directory! (lb_directory)")
@@ -355,8 +380,10 @@ local function SaveRecord(score, map, modeSep)
 	print("Saving score ("..score.id..")")
 	if isserver then
 		Dirty[score.id] = true
-		writeMapStore(map, LiveStore[map])
-		writeIndex()
+		if ghosts then
+			writeGhost(score, ghosts)
+		end
+		dumpStoreToFile()
 	end
 end
 rawset(_G, "lb_save_record", SaveRecord)
@@ -403,8 +430,7 @@ local function oldParseScore(str)
 				t[2], -- Name
 				t[3], -- Skin
 				tonumber(t[4]), -- Color
-				stats,
-				""
+				stats
 			)
 		}
 	), tonumber(t[1]), checksum
@@ -429,8 +455,7 @@ local function parseScoreBinary(f)
 		local skin = f:readstr()
 		local color = f:read8()
 		local stats = f:read8()
-		local ghost = f:readlstr()
-		table.insert(players, player_t(name, skin, color, stat_t(stats >> 4, stats & 0xf), ghost))
+		table.insert(players, player_t(name, skin, color, stat_t(stats >> 4, stats & 0xf)))
 	end
 
 	return score_t(
@@ -442,65 +467,34 @@ local function parseScoreBinary(f)
 	)
 end
 
-local function loadStore(f, filename)
+local function loadMapStore(f)
 	local store = {}
-
-	if f:readliteral(11) ~= "LEADERBOARD" then
-		error(string.format("Failed to read %s: bad magic", filename), 2)
-	end
-	local version = f:read8()
-	if version > LEADERBOARD_VERSION then
-		error(string.format("Failed to read %s: version %d not supported (highest is %d)", filename, version, LEADERBOARD_VERSION), 2)
-	end
-
-	local numchecksums = f:readnum()
-	for i = 1, numchecksums do
-		local checksum = f:readstr()
-		local numrecords = f:readnum()
-		store[checksum] = {}
-		for j = 1, numrecords do
-			local score = parseScoreBinary(f)
-			if score then
-				table.insert(store[checksum], score)
+	for _ = 1, f:readnum() do
+		local mapnum = mapnumFromExtended(f:readstr())
+		local numchecksums = f:readnum()
+		local checksums = {}
+		store[mapnum] = checksums
+		for i = 1, numchecksums do
+			local checksum = string.format("%04x", f:read16())
+			local numrecords = f:readnum()
+			local scores = {}
+			checksums[checksum] = scores
+			for j = 1, numrecords do
+				table.insert(scores, parseScoreBinary(f))
 			end
 		end
 	end
-
 	return store
 end
 
 local function loadColdStore(f)
-	local store = {}
-
-	if f:readliteral(9) ~= "COLDSTORE" then
-		error("Failed to read cold store: bad magic", 2)
-	end
 	local directory = f:readstr()
-
-	while not f:empty() do
-		local mapnum = mapnumFromExtended(f:readstr())
-		local numchecksums = f:readnum()
-		store[mapnum] = {}
-		for i = 1, numchecksums do
-			local checksum = f:readstr()
-			local numrecords = f:readnum()
-			store[mapnum][checksum] = {}
-			for j = 1, numrecords do
-				local score = parseScoreBinary(f)
-				if score then
-					table.insert(store[mapnum][checksum], score)
-				end
-			end
-		end
-	end
+	local store = loadMapStore(f)
 
 	return store, directory
 end
 
 local function getColdStoreDir(f)
-	if f:readliteral(9) ~= "COLDSTORE" then
-		error("Failed to read cold store: bad magic", 2)
-	end
 	return f:readstr()
 end
 
@@ -512,31 +506,26 @@ local function loadStoreFile(directory)
 	Dirty = {}
 	NextID = 1
 
-	local index = StringReader(open(string.format("Leaderboard/%s/%s.sav2", StoreName, "index"), "rb"))
-	if not index then
+	local f = read_segmented(string.format("Leaderboard/%s/store.sav2", StoreName))
+	if not f then
 		-- empty store, start a new one
 		return
 	end
-	if index:read8() > INDEX_VERSION then
-		error("Failed to load index (too new)", 2)
-	end
-	NextID = index:readnum()
 
-	while true do
-		local mapname = index:readstr()
-		if mapname == "" then break end
-		local filename = string.format("Leaderboard/%s/%s.sav2", StoreName, mapname)
-		local f = read_segmented(filename)
-		if f then
-			LiveStore[mapnumFromExtended(mapname)] = loadStore(f, filename)
-		else
-			print("File not found for "..mapname)
-		end
+	if f:readliteral(11) ~= "LEADERBOARD" then
+		error("Failed to read store: bad magic", 2)
+	end
+	local version = f:read8()
+	if version > LEADERBOARD_VERSION then
+		error(string.format("Failed to read store: version %d not supported (highest is %d)", version, LEADERBOARD_VERSION), 2)
 	end
 
-	while not index:empty() do
-		Dirty[index:readnum()] = true
+	NextID = f:readnum()
+	for _ = 1, f:readnum() do
+		Dirty[f:readnum()] = true
 	end
+
+	LiveStore = loadMapStore(f)
 end
 
 local function squishStore(store)
@@ -584,12 +573,13 @@ local function moveRecords(sourcemap, sourcesum, targetmap, targetsum, modeSep)
 	local moved = #LiveStore[sourcemap][sourcesum]
 
 	-- Destroy the original table
+	for _, record in ipairs(LiveStore[sourcemap][sourcesum]) do
+		deleteGhost(record)
+	end
 	LiveStore[sourcemap][sourcesum] = nil
 
 	if isserver then
-		writeMapStore(sourcemap, LiveStore[sourcemap])
-		if not delete then writeMapStore(targetmap, LiveStore[targetmap]) end
-		writeIndex()
+		dumpStoreToFile()
 	end
 
 	return moved
@@ -640,7 +630,6 @@ addHook("MapChange", loadit)
 
 local function netvars(net)
 	if replayplayback then return end
-	NextID = net($)
 	if isserver then
 		--print("sending")
 		local send = {}
@@ -672,11 +661,12 @@ local function netvars(net)
 		end
 		squishStore(send)
 		local dat = writeColdStore(send)
-		net(dat, table.concat(deleted))
+		net(dat, table.concat(deleted), NextID)
 	else
 		loadit()
 		local diff = loadColdStore(StringReader(net("Yes I would like uhhh")))
 		local deleted = StringReader(net("two strings please"))
+		NextID = net("oh and a number")
 		local deletions = {}
 		while not deleted:empty() do
 			deletions[deleted:readnum()] = true
@@ -726,7 +716,7 @@ COM_AddCommand("lb_write_coldstore", function(player, filename)
 
 	print("Cold store script written to "..filename.." (rename to "..filename:gsub(".txt", ".lua").."!)")
 	Dirty = {}
-	writeIndex()
+	dumpStoreToFile()
 end, COM_LOCAL)
 
 COM_AddCommand("lb_known_maps", function(player, map)

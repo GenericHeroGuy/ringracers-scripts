@@ -2,9 +2,9 @@ $basepath src/leaderboard/
 $output out/leaderboard.pk3
 
 Lua/lb_common.lua
+Lua/lb_store.lua
 Lua/lbcomms.lua
 Lua/bghost.lua
-Lua/lb_store.lua
 Lua/browser.lua
 Lua/**
 **

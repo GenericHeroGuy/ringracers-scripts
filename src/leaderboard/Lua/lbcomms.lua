@@ -10,6 +10,9 @@
 -- lb_common.lua
 local StringWriter = lb_string_writer
 
+-- lb_store.lua
+local ReadGhost = lb_read_ghost
+
 ----------------------------
 
 local tohex = {}
@@ -160,9 +163,15 @@ local packets = {
 					for _, record in ipairs(records) do
 						if record.id == recordid then
 							-- gotcha!
-							for i, p in ipairs(record.players) do
+							local ghosts = ReadGhost(record)
+							if not ghosts then
+								--print("no ghosts saved")
+								return
+							end
+							for i, ghost in ipairs(ghosts) do
 								ghostdata:write8(i)
-								ghostdata:writelstr(p.ghost)
+								ghostdata:writenum(ghost.startofs)
+								ghostdata:writelstr(ghost.data)
 							end
 						end
 					end

@@ -6,6 +6,10 @@
 local StringReader = lb_string_reader
 local StringWriter = lb_string_writer
 local getThrowDir = lb_throw_dir
+local ghost_t = lb_ghost_t
+
+-- lb_store.lua
+local ReadGhost = lb_read_ghost
 
 -----------------------------
 
@@ -550,11 +554,9 @@ end -- if RINGS
 
 -- start recording ghost data for player
 local function StartRecording(player)
-	local writer = StringWriter()
-	writer:writenum(leveltime) -- startofs
-
 	recorders[player] = {
-		data = table.concat(writer),
+		data = "",
+		startofs = leveltime,
 		lastsneaker = 0,
 		lastspark = 0,
 		lastfastlines = false,
@@ -589,8 +591,9 @@ rawset(_G, "lb_ghost_start_recording", StartRecording)
 -- returns the recorded data
 local function StopRecording(player)
 	local data = recorders[player].data
+	local startofs = recorders[player].startofs
 	recorders[player] = nil
-	return data
+	return ghost_t(data, startofs)
 end
 rawset(_G, "lb_ghost_stop_recording", StopRecording)
 
@@ -676,9 +679,13 @@ local function SpawnCombiLink(r)
 		r.combilink[i] = link
 	end
 end
-
-local function PlayGhost(record)
-	local ghosts = {}
+-- plays the ghost(s) stored in the provided record
+local function StartPlaying(record)
+	local ghosts = ReadGhost(record)
+	if not ghosts then
+		return false
+	end
+	local reps = {}
 	for i, recplayer in ipairs(record.players) do
 		local mo = SpawnLocal(0, 0, 0, MT_THOK)
 		mo.flags = MF_NOTHINK|MF_NOSECTOR|MF_NOBLOCKMAP|MF_NOGRAVITY|MF_NOCLIP|MF_NOCLIPTHING|MF_NOCLIPHEIGHT|MF_DONTENCOREMAP
@@ -686,11 +693,10 @@ local function PlayGhost(record)
 		mo.skin = recplayer.skin
 		mo.color = recplayer.color
 
-		local reader = StringReader(recplayer.ghost)
-		local ghost = setmetatable({
-			file = reader,
+		local rep = setmetatable({
+			file = StringReader(ghosts[i].data),
 			name = recplayer.name,
-			startofs = reader:readnum(),
+			startofs = ghosts[i].startofs,
 			mo = mo,
 			gmomx = 0,
 			gmomy = 0,
@@ -729,27 +735,18 @@ local function PlayGhost(record)
 			dead = false,
 			acrotrick = false,
 		}, { __index = do error("no", 2) end, __newindex = do error("no", 2) end })
-		table.insert(ghosts, ghost)
-		replayers[ghost] = true
+		table.insert(reps, rep)
+		replayers[rep] = true
 	end
 
 	if record.flags & F_COMBI then
-		for i, g in ipairs(ghosts) do
-			local partner = ghosts[(i % #ghosts)+1]
+		for i, g in ipairs(reps) do
+			local partner = reps[(i % #reps)+1]
 			g.combipartner = partner.mo
 			SpawnCombiLink(g)
 		end
 	end
-end
 
--- plays the ghost(s) stored in the provided record
-local function StartPlaying(record)
-	for _, p in ipairs(record.players) do
-		if not #p.ghost then
-			return false
-		end
-	end
-	PlayGhost(record)
 	return true
 end
 rawset(_G, "lb_ghost_start_playing", StartPlaying)
