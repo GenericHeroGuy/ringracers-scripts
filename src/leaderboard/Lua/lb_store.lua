@@ -28,6 +28,7 @@ local cv_directory = CV_RegisterVar({
 	flags = CV_NETVAR|CV_CALL|CV_NOINIT,
 	defaultvalue = "",
 	func = function(cv)
+		if replayplayback then return end
 		reloadstore = true
 		print("Store changed to "..cv.string)
 		if consoleplayer and lines[0] then
@@ -209,7 +210,7 @@ local function dumpStoreToFile()
 end
 
 local function recordsIdentical(a, b)
-	if a.id ~= b.id or a.map ~= b.map or a.flags ~= b.flags or a.time ~= b.time or #a.players ~= #b.players then return false end
+	if --[[a.id ~= b.id or]] a.flags ~= b.flags or a.time ~= b.time or #a.players ~= #b.players then return false end
 	for i, s in ipairs(a.splits) do
 		if s ~= b.splits[i] then return false end
 	end
@@ -220,95 +221,78 @@ local function recordsIdentical(a, b)
 	return true
 end
 
-local function mergeStore(other, iscold, deletelist)
+local function mergeStore(other, deletelist)
 	-- first, get the IDs of all records in here
 	local my_mapforid = {}
 	for map, checksums in pairs(LiveStore) do
 		for checksum, records in pairs(checksums)
 			for i, record in ipairs(records) do
 				my_mapforid[record.id] = { map = map, rec = record, checksum = checksum, i = i }
+				NextID = max($, record.id+1)
 			end
 		end
 	end
-
 	local other_mapforid = {}
 	for map, checksums in pairs(other) do
 		for checksum, records in pairs(checksums) do
 			for i, record in ipairs(records) do
-				other_mapforid[record.id] = { map = map, rec = record, checksum = checksum, i = i }
+				other_mapforid[record.id] = { map = map, rec = record, checksum = checksum }
+				NextID = max($, record.id+1)
 			end
 		end
 	end
+
+	local writes = {} -- which maps to write
 
 	-- check the ids of the other store's records to see if anything moved
-	for id, ot in pairs(other_mapforid) do
-		local my = my_mapforid[id]
-		if my and my.map ~= ot.map then
-			-- move
-			LiveStore[ot.map] = $ or {}
-			LiveStore[ot.map][ot.checksum] = $ or {}
-			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
-			LiveStore[my.map][my.checksum][my.i] = false
-			--print(string.format("move %d %d", ot.map, id))
-		elseif my then
-			if iscold or recordsIdentical(my.rec, ot.rec) then
-				-- passthrough
-				--print(string.format("passthrough %d %d", my.map, id))
-			else
-				-- overwrite (this wipes the ghost, other rec has empty ghost)
-				LiveStore[my.map][my.checksum][my.i] = ot.rec
-				--print(string.format("overwrite %d %d", my.map, id))
+	for id = 1, NextID do
+		local my, ot = my_mapforid[id], other_mapforid[id]
+		if not ot or deletelist[id] then
+			-- server doesn't have record anymore
+			if my then
+				LiveStore[my.map][my.checksum][my.i] = false
+				writes[my.map] = true
 			end
-		elseif not Dirty[id] then
-			-- add
-			LiveStore[ot.map] = $ or {}
-			LiveStore[ot.map][ot.checksum] = $ or {}
+			--print(string.format("delete %d", id))
+		elseif not my and ot then
+			-- server has a record we don't have
+			if not LiveStore[ot.map] then LiveStore[ot.map] = {} end
+			if not LiveStore[ot.map][ot.checksum] then LiveStore[ot.map][ot.checksum] = {} end
 			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
+			writes[ot.map] = true
 			--print(string.format("add %d %d", ot.map, id))
-		else
-			-- if it's not in livestore and is in coldstore, but it's marked dirty, then it's a deleted cold record
-			--print(string.format("ignoring %d %d", ot.map, id))
-		end
-	end
-
-	-- check for records that exist in our store but not the other, and delete them
-	-- (unless they're dirty. don't wipe new records when the server shuts down)
-	for id, my in pairs(my_mapforid) do
-		local ot = other_mapforid[id]
-		if (iscold and not (ot or Dirty[id])) or (deletelist and deletelist[id]) then
-			-- delete
+		elseif my and ot and (not recordsIdentical(my.rec, ot.rec) or my.map ~= ot.map or my.checksum ~= ot.checksum) then
+			-- replace our record with the server's, wiping the ghost
 			LiveStore[my.map][my.checksum][my.i] = false
-			--[[
-			print(string.format("delete %d %d", my.map, id))
-			if not ot then
-				print("not in other")
-			end
-			if not Dirty[id] then
-				print("not dirty")
-			end
-			if deletelist and deletelist[id] then
-				print("deletelist")
-			end
-			--]]
+			if not LiveStore[ot.map] then LiveStore[ot.map] = {} end
+			if not LiveStore[ot.map][ot.checksum] then LiveStore[ot.map][ot.checksum] = {} end
+			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
+			writes[my.map] = true
+			writes[ot.map] = true
+			--print(string.format("overwrite %d %d", my.map, id))
+		else
+			--print(string.format("passthrough %d %d", ot.map, id))
 		end
 	end
 
-	-- now delete the gaps (dear god...)
-	for map, checksums in pairs(LiveStore) do
-		for checksum, records in pairs(checksums) do
+	for map in pairs(writes) do
+		-- delete the gaps
+		for checksum, records in pairs(LiveStore[map]) do
 			for i = #records, 1, -1 do
-				if records[i] == false then
+				if not records[i] then
 					table.remove(records, i)
 				end
 			end
+			-- no records? delete the table to save space
 			if not next(records) then
-				checksums[checksum] = nil
+				LiveStore[map][checksum] = nil
 			end
 		end
+		-- then write the store
+		writeMapStore(map, LiveStore[map])
 	end
-
-	-- hopefully this gets rewritten soon
-	-- G from future: this is probably as good as it gets
+	Dirty = {} -- you won't be needing this anymore
+	writeIndex()
 end
 
 -- GLOBAL
@@ -367,10 +351,10 @@ local function SaveRecord(score, map, modeSep)
 		score.id = NextID
 		NextID = $ + 1
 	end
-	Dirty[score.id] = true
 
 	print("Saving score ("..score.id..")")
 	if isserver then
+		Dirty[score.id] = true
 		writeMapStore(map, LiveStore[map])
 		writeIndex()
 	end
@@ -513,6 +497,13 @@ local function loadColdStore(f)
 	return store, directory
 end
 
+local function getColdStoreDir(f)
+	if f:readliteral(9) ~= "COLDSTORE" then
+		error("Failed to read cold store: bad magic", 2)
+	end
+	return f:readstr()
+end
+
 -- Read and parse a store file
 local function loadStoreFile(directory)
 	print("Loading store "..directory)
@@ -561,13 +552,14 @@ local function squishStore(store)
 	end
 end
 
+local coldloaded
+
 local function AddColdStoreBinary(str)
 	if replayplayback then return end
-	local f = StringReader(lb_base128_decode(str))
-	local store, directory = loadColdStore(f)
-	loadStoreFile(directory)
-	mergeStore(store, true)
-	dumpStoreToFile()
+	coldloaded = lb_base128_decode(str)
+	-- pre-emptively load the store to reduce join lag
+	local dir = getColdStoreDir(StringReader(coldloaded))
+	loadStoreFile(dir)
 end
 rawset(_G, "lb_add_coldstore_binary", AddColdStoreBinary)
 
@@ -586,7 +578,7 @@ local function moveRecords(sourcemap, sourcesum, targetmap, targetsum, modeSep)
 		LiveStore[targetmap][targetsum] = $ or {}
 	end
 	for i, score in ipairs(LiveStore[sourcemap][sourcesum]) do
-		Dirty[score.id] = true
+		if isserver then Dirty[score.id] = true end
 		if not delete then insertOrReplace(LiveStore[targetmap][targetsum], score, modeSep) end
 	end
 	local moved = #LiveStore[sourcemap][sourcesum]
@@ -604,7 +596,48 @@ local function moveRecords(sourcemap, sourcesum, targetmap, targetsum, modeSep)
 end
 rawset(_G, "lb_move_records", moveRecords)
 
-local netreceived, netdeleted
+-- if we've got a coldstore loaded, apply the server's diff onto it
+local function applyColdStore(diff)
+	local coldstore, directory = loadColdStore(StringReader(coldloaded))
+	if directory ~= StoreName then
+		return diff
+	end
+	for map, checksums in pairs(diff) do
+		if not coldstore[map] then coldstore[map] = {} end
+		for checksum, records in pairs(checksums) do
+			if not coldstore[map][checksum] then coldstore[map][checksum] = {} end
+			for _, record in ipairs(records) do
+				local target
+				for i, rec2 in ipairs(coldstore[map][checksum]) do
+					if rec2.id == record.id then
+						target = i
+						break
+					end
+				end
+				if target then
+					coldstore[map][checksum][target] = record
+				else
+					table.insert(coldstore[map][checksum], record)
+				end
+			end
+		end
+	end
+	return coldstore
+end
+
+-- wait until netvars/mapchange so the savegame has a chance to set cv_directory
+-- also in RR, maps are most likely not loaded yet, so we can't get their numbers
+local function loadit()
+	if reloadstore then
+		reloadstore = false
+		-- if we already have the right store, don't reload it
+		if StoreName ~= cv_directory.string then
+			loadStoreFile(cv_directory.string)
+		end
+	end
+end
+addHook("MapChange", loadit)
+
 local function netvars(net)
 	if replayplayback then return end
 	NextID = net($)
@@ -631,30 +664,30 @@ local function netvars(net)
 		for i in pairs(Dirty) do
 			highest = max($, i)
 		end
-		local deleted = {}
+		local deleted = StringWriter()
 		for i = 1, highest do
 			if not byid[i] then
-				deleted[i] = true
+				deleted:writenum(i)
 			end
 		end
 		squishStore(send)
 		local dat = writeColdStore(send)
-		net(dat, deleted)
+		net(dat, table.concat(deleted))
 	else
-		netreceived, netdeleted = net("gotta wait until PlayerJoin because UnArchiveTables hasn't been run yet", "deletions yay")
+		loadit()
+		local diff = loadColdStore(StringReader(net("Yes I would like uhhh")))
+		local deleted = StringReader(net("two strings please"))
+		local deletions = {}
+		while not deleted:empty() do
+			deletions[deleted:readnum()] = true
+		end
+		if coldloaded then
+			diff = applyColdStore($)
+		end
+		mergeStore(diff, deletions)
 	end
 end
 addHook("NetVars", netvars)
-
-addHook("PlayerJoin", function(p)
-	if netreceived and #consoleplayer == p then
-		local newstore = loadColdStore(StringReader(netreceived))
-		mergeStore(newstore, false, netdeleted)
-		dumpStoreToFile()
-	end
-	netreceived = nil
-	netdeleted = nil
-end)
 
 COM_AddCommand("lb_write_coldstore", function(player, filename)
 	if not filename then
@@ -744,12 +777,4 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 
 	dumpStoreToFile()
 end, COM_LOCAL)
-end
-
--- wait until netvars/mapchange so the savegame has a chance to set cv_directory
--- also in RR, maps are most likely not loaded yet, so we can't get their numbers
-local function loadit()
-	if reloadstore then reloadstore = false; loadStoreFile(cv_directory.string) end
-end
-addHook("MapChange", loadit)
-addHook("NetVars", loadit)
+end -- if not RINGS
