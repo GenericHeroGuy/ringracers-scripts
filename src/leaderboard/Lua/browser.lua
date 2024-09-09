@@ -24,6 +24,12 @@ local RINGS = VERSION == 2
 local TURNING = RINGS and "turning" or "driftturn"
 local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
 
+local cv_showallstats = CV_RegisterVar({
+	name = "lb_showallstats",
+	defaultvalue = "Off",
+	possiblevalue = CV_OnOff,
+})
+
 local cv_kartencore
 
 local cv_highresportrait
@@ -32,7 +38,7 @@ local function useHighresPortrait()
 	if cv_highresportrait then
 		return cv_highresportrait.value ~= cv_lb_highresportrait.value
 	end
-	
+
 	return cv_lb_highresportrait and cv_lb_highresportrait.value
 end
 
@@ -40,7 +46,7 @@ local function lookupCvars()
 	if not cv_highresportrait then
 		cv_highresportrait = CV_FindVar("highresportrait")
 	end
-	
+
 	if not cv_lb_highresportrait then
 		cv_lb_highresportrait = CV_FindVar("lb_highresportrait")
 	end
@@ -189,7 +195,7 @@ local function drawMapStrings(v)
 			"right"
 		)
 	end
-    
+
     if nmr and NMR_GetRemovedMaps()[getMap()] then
         v.drawString(
 			300,
@@ -333,13 +339,25 @@ local MSK_WEIGHT = 0xF
 
 local function drawStats(v, x, y, skin, stats)
 	local s = skins[skin]
+
+	local color = ""
+
+	if not stats and cv_showallstats.value and s then
+		stats = (s.kartspeed<<4) | s.kartweight
+	end
+
+	local matchskinstats = stats and s and (s.kartspeed == (stats & MSK_SPEED) >> 4) and (s.kartweight == stats & MSK_WEIGHT)
+
+	-- Highlight restat if all stats are shown
+	if cv_showallstats.value and not matchskinstats then
+		color = "\130"
+	end
+
 	if stats
-		and not (s
-		and s.kartspeed == (stats & MSK_SPEED) >> 4
-		and s.kartweight == stats & MSK_WEIGHT
-		) then
-		v.drawString(x-2, y-2, (stats & MSK_SPEED) >> 4, V_ALLOWLOWERCASE, "thin")
-		v.drawString(x + 13, y + 9, stats & MSK_WEIGHT, V_ALLOWLOWERCASE, "thin")
+		and (not matchskinstats
+			or cv_showallstats.value) then
+		v.drawString(x-2, y-2, color..((stats & MSK_SPEED) >> 4), V_ALLOWLOWERCASE, "thin")
+		v.drawString(x + 13, y + 9, color..(stats & MSK_WEIGHT), V_ALLOWLOWERCASE, "thin")
 	end
 end
 
