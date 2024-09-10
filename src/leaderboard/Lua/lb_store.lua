@@ -267,7 +267,7 @@ local function mergeStore(other, deletelist)
 		end
 	end
 
-	local writes = {} -- which maps to write
+	local gaps = {} -- which maps might have gaps
 
 	-- check the ids of the other store's records to see if anything moved
 	for id = 1, NextID do
@@ -276,8 +276,6 @@ local function mergeStore(other, deletelist)
 			-- server doesn't have record anymore
 			if my then
 				LiveStore[my.map][my.checksum][my.i] = false
-				writes[my.map] = true
-				deleteGhost(my.rec)
 			end
 			--print(string.format("delete %d", id))
 		elseif not my and ot then
@@ -285,7 +283,6 @@ local function mergeStore(other, deletelist)
 			if not LiveStore[ot.map] then LiveStore[ot.map] = {} end
 			if not LiveStore[ot.map][ot.checksum] then LiveStore[ot.map][ot.checksum] = {} end
 			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
-			writes[ot.map] = true
 			--print(string.format("add %d %d", ot.map, id))
 		elseif my and ot and (not recordsIdentical(my.rec, ot.rec) or my.map ~= ot.map or my.checksum ~= ot.checksum) then
 			-- replace our record with the server's, wiping the ghost
@@ -293,16 +290,17 @@ local function mergeStore(other, deletelist)
 			if not LiveStore[ot.map] then LiveStore[ot.map] = {} end
 			if not LiveStore[ot.map][ot.checksum] then LiveStore[ot.map][ot.checksum] = {} end
 			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
-			writes[my.map] = true
-			writes[ot.map] = true
-			deleteGhost(my.rec)
 			--print(string.format("overwrite %d %d", my.map, id))
 		else
 			--print(string.format("passthrough %d %d", ot.map, id))
+			continue
 		end
+		-- if we didn't continue, something's changed. wipe the ghosts
+		if my then gaps[my.map] = true; deleteGhost(my.rec) end
+		if ot then gaps[ot.map] = true; deleteGhost(ot.rec) end
 	end
 
-	for map in pairs(writes) do
+	for map in pairs(gaps) do
 		-- delete the gaps
 		for checksum, records in pairs(LiveStore[map]) do
 			for i = #records, 1, -1 do
@@ -382,6 +380,8 @@ local function SaveRecord(score, map, modeSep, ghosts)
 		Dirty[score.id] = true
 		if ghosts then
 			writeGhost(score, ghosts)
+		else
+			deleteGhost(score)
 		end
 		dumpStoreToFile()
 	end
@@ -761,6 +761,7 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 		LiveStore[map][checksum] = $ or {}
 		table.insert(LiveStore[map][checksum], score)
 		NextID = $ + 1
+		deleteGhost(score)
 	end
 	f:close()
 	Dirty = {}
