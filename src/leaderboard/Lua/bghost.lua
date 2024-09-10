@@ -679,8 +679,13 @@ local function SpawnCombiLink(r)
 		r.combilink[i] = link
 	end
 end
+
 -- plays the ghost(s) stored in the provided record
 local function StartPlaying(record)
+	if isdedicatedserver then
+		return true
+	end
+
 	local ghosts = ReadGhost(record)
 	if not ghosts then
 		return false
@@ -972,6 +977,7 @@ local booleans = {
 
 addHook("ThinkFrame", function()
 	if defrosting then return end
+	if not consoleplayer or (not isserver and consoleplayer == server) then return end -- joining a server
 	--[[
 	if not next(replayers) then
 		if ghostwatching then
@@ -1291,7 +1297,10 @@ addHook("ThinkFrame", function()
 		else
 			consoleplayer.awayviewaiming = pitch
 		end
-		consoleplayer.awayviewtics = 2
+
+		-- any higher than 1 and the game segfaults in R_SetupFrame
+		-- the camera mobj is client-sided, so if someone joins while you're watching a ghost, you're cooked
+		consoleplayer.awayviewtics = 1
 	end
 end)
 

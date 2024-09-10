@@ -71,6 +71,14 @@ local totalconnections = 0
 local fmt = string.format
 local timeout = {}
 
+local function me()
+	if isdedicatedserver then
+		return server
+	else
+		return consoleplayer
+	end
+end
+
 local sendPacket
 
 local packets = {
@@ -79,7 +87,7 @@ local packets = {
 		func = function(p, channel, data)
 			local target = data:byte(1)
 			local length = tonumber(data:sub(2))
-			if #consoleplayer == target then
+			if #me() == target then
 				--print("is for me?")
 				local rx = {
 					data = "",
@@ -150,7 +158,7 @@ local packets = {
 				print("Corrupted ghost request from "..p.name)
 				return
 			end
-			if #consoleplayer == target then
+			if #me() == target then
 				print(p.name.." requesting ghost for "..recordid)
 				if not isserver then
 					-- i'm not the server, i can't give you any ghosts!
@@ -183,7 +191,7 @@ local packets = {
 					state = "sending",
 					channel = channel,
 					finallength = #ghostdata,
-					who = consoleplayer,
+					who = me(),
 				}
 				table.insert(myconnections, tx)
 				sendPacket("ghostack", channel, tostring(#ghostdata))
@@ -215,7 +223,7 @@ function sendPacket(type, channel, data)
 		end
 	end
 	--print(fmt("sending %s channel %d", type, channel))
-	COM_BufAddText(consoleplayer, fmt('\x7f "%s"', base128encode(string.char(ptype, channel)..data)))
+	COM_BufAddText(me(), fmt('\x7f "%s"', base128encode(string.char(ptype, channel)..data)))
 end
 
 COM_AddCommand("\x7f", function(p, data)
@@ -226,7 +234,7 @@ COM_AddCommand("\x7f", function(p, data)
 		print("unknown packet type "..tostring(ptype))
 		return
 	end
-	if p ~= consoleplayer then
+	if p ~= me() then
 		--print(fmt("received %s from %s channel %d", k, p.name, channel))
 	end
 	packets[ptype].func(p, channel, data:sub(3))
@@ -280,7 +288,8 @@ local function transferThinker()
 
 	for p in pairs(timeout) do
 		timeout[p] = ($ or 0) + 1
-		if timeout[p] > cv_timeout.value then
+		-- need extra time after map changes, it takes longer for requests to reach the server
+		if timeout[p] > cv_timeout.value + max(TICRATE - leveltime, 0) then
 			timeout[p] = nil
 			for _, rx in ipairs(myconnections) do
 				if rx.who == p then

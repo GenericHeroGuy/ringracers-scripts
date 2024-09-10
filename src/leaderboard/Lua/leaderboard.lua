@@ -1541,7 +1541,7 @@ local function think()
 		end
 
 		-- Autospec
-		if leveltime == 1 then
+		if leveltime == 1 and gamers[1] then
 			for s in players.iterate do
 				if s.valid and s.spectator then
 					COM_BufInsertText(s, string.format("view \"%d\"", #gamers[1]))
@@ -1559,7 +1559,7 @@ local function think()
 				end
 			end
 
-			Flags = checkFlags(gamers[1])
+			Flags = checkFlags(gamers[1] or {}) -- only needed for SPBA cheats anyway, so... see below
 
 			-- make sure the spb actually spawned
 			if server.SPBArunning and leveltime == START_TIME - 1 then
@@ -1634,7 +1634,7 @@ local function think()
 			drawState = DS_DEFAULT
 			S_StartSound(nil, 100)
 		end
-	elseif gamers[1].lives == 0 then
+	elseif gamers[1] and gamers[1].lives == 0 then
 		drawState = DS_SCROLL
 	end
 
