@@ -178,16 +178,14 @@ rawset(_G, "lb_write_ghost", writeGhost)
 
 local function readGhost(record)
 	local f = StringReader(open(string.format("Leaderboard/%s/g%d.sav2", StoreName, record.id), "rb"))
-	if not f then return nil end
+	if not f or f:empty() then return nil end
 
 	if f:readliteral(5) ~= "GHOST" then
-		--error("Failed to read ghost: bad magic", 2)
-		return nil
+		error("Failed to read ghost: bad magic", 2)
 	end
 	local version = f:read8()
 	if version > GHOST_VERSION then
-		--error(string.format("Failed to read ghost: version %d not supported (highest is %d)", version, GHOST_VERSION), 2)
-		return nil
+		error(string.format("Failed to read ghost: version %d not supported (highest is %d)", version, GHOST_VERSION), 2)
 	end
 
 	local ghosts = {}
@@ -203,14 +201,15 @@ end
 rawset(_G, "lb_read_ghost", readGhost)
 
 -- can't delete a file, so best we can do is truncate it
-local function deleteGhost(record)
-	local f = open(string.format("Leaderboard/%s/g%d.sav2", StoreName, record.id), "rb")
+local function deleteGhost(id)
+	local f = open(string.format("Leaderboard/%s/g%d.sav2", StoreName, id), "rb")
 	if f then
 		f:close()
-		f = open(string.format("Leaderboard/%s/g%d.sav2", StoreName, record.id), "wb")
+		f = open(string.format("Leaderboard/%s/g%d.sav2", StoreName, id), "wb")
 		f:close()
 	end
 end
+rawset(_G, "lb_delete_ghost", deleteGhost)
 
 local function writeColdStore(store)
 	local f = StringWriter()
@@ -296,8 +295,8 @@ local function mergeStore(other, deletelist)
 			continue
 		end
 		-- if we didn't continue, something's changed. wipe the ghosts
-		if my then gaps[my.map] = true; deleteGhost(my.rec) end
-		if ot then gaps[ot.map] = true; deleteGhost(ot.rec) end
+		if my then gaps[my.map] = true; deleteGhost(id) end
+		if ot then gaps[ot.map] = true; deleteGhost(id) end
 	end
 
 	for map in pairs(gaps) do
@@ -381,7 +380,7 @@ local function SaveRecord(score, map, modeSep, ghosts)
 		if ghosts then
 			writeGhost(score, ghosts)
 		else
-			deleteGhost(score)
+			deleteGhost(score.id)
 		end
 		dumpStoreToFile()
 	end
@@ -574,7 +573,7 @@ local function moveRecords(sourcemap, sourcesum, targetmap, targetsum, modeSep)
 
 	-- Destroy the original table
 	for _, record in ipairs(LiveStore[sourcemap][sourcesum]) do
-		deleteGhost(record)
+		deleteGhost(record.id)
 	end
 	LiveStore[sourcemap][sourcesum] = nil
 
@@ -761,7 +760,7 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 		LiveStore[map][checksum] = $ or {}
 		table.insert(LiveStore[map][checksum], score)
 		NextID = $ + 1
-		deleteGhost(score)
+		deleteGhost(score.id)
 	end
 	f:close()
 	Dirty = {}

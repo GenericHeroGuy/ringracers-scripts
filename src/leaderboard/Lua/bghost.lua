@@ -10,6 +10,7 @@ local ghost_t = lb_ghost_t
 
 -- lb_store.lua
 local ReadGhost = lb_read_ghost
+local DeleteGhost = lb_delete_ghost
 
 -----------------------------
 
@@ -690,6 +691,9 @@ local function StartPlaying(record)
 	if not ghosts then
 		return false
 	end
+	if #record.players ~= #ghosts then
+		error("Player count doesn't match ghost count")
+	end
 	local reps = {}
 	for i, recplayer in ipairs(record.players) do
 		local mo = SpawnLocal(0, 0, 0, MT_THOK)
@@ -708,6 +712,7 @@ local function StartPlaying(record)
 			gmomz = 0,
 			gmoma = 0,
 			realangle = 0,
+			recid = record.id,
 
 			fspecial = 0,
 			lastfspecial = 0,
@@ -754,7 +759,19 @@ local function StartPlaying(record)
 
 	return true
 end
-rawset(_G, "lb_ghost_start_playing", StartPlaying)
+rawset(_G, "lb_ghost_start_playing", function(record)
+	local ok, ret = pcall(StartPlaying, record)
+	if not ok then
+		print("\x82WARNING:\x80 Failed to start ghost", ret)
+		if record and record.id ~= nil then
+			print("Deleting ghost "..record.id)
+			DeleteGhost(record.id)
+		end
+		return false -- download again I guess
+	else
+		return ret
+	end
+end)
 
 local function StopWatching()
 	ghostwatching = nil
@@ -975,36 +992,11 @@ local booleans = {
 	[GS_ACROTRICK] = "acrotrick",
 }
 
-addHook("ThinkFrame", function()
-	if defrosting then return end
-	if not consoleplayer or (not isserver and consoleplayer == server) then return end -- joining a server
-	--[[
-	if not next(replayers) then
-		if ghostwatching then
-			if consoleplayer.cmd.buttons & BT_CUSTOM1 then
-				COM_BufInsertText(server, "map "..gamemap.." -f")
-				ghostwatching = nil
-			end
-		end
-		return
-	end
-	--]]
-
-	if consoleplayer.cmd.buttons & BT_CUSTOM2 then
-		ghostcustom2 = $ + 1
-	else
-		ghostcustom2 = 0
-	end
-
-	if ghostcustom2 == 1 then
-		if not (ghostcam and ghostcam.valid) then
-			ghostcam = SpawnLocal(0, 0, 0, MT_THOK)
-			ghostcam.flags = MF_NOTHINK|MF_NOSECTOR|MF_NOBLOCKMAP|MF_NOCLIP|MF_NOCLIPHEIGHT|MF_NOCLIPTHING
-		end
-		NextWatch()
-	end
-
+local errorghost
+local function RunGhosts()
+	errorghost = nil
 	for r in pairs(replayers) do
+		errorghost = r
 		if leveltime < r.startofs then
 			continue
 		elseif leveltime == r.startofs then
@@ -1240,8 +1232,58 @@ addHook("ThinkFrame", function()
 
 	-- update combi links after all ghosts have moved
 	for r in pairs(replayers) do
+		errorghost = r
 		if r.combipartner and r.combipartner.valid then
 			MoveCombiLink(r)
+		end
+	end
+	errorghost = nil -- no more error handling
+end
+
+addHook("ThinkFrame", function()
+	if defrosting then return end
+	if not consoleplayer or (not isserver and consoleplayer == server) then return end -- joining a server
+	--[[
+	if not next(replayers) then
+		if ghostwatching then
+			if consoleplayer.cmd.buttons & BT_CUSTOM1 then
+				COM_BufInsertText(server, "map "..gamemap.." -f")
+				ghostwatching = nil
+			end
+		end
+		return
+	end
+	--]]
+
+	if consoleplayer.cmd.buttons & BT_CUSTOM2 then
+		ghostcustom2 = $ + 1
+	else
+		ghostcustom2 = 0
+	end
+
+	if ghostcustom2 == 1 then
+		if not (ghostcam and ghostcam.valid) then
+			ghostcam = SpawnLocal(0, 0, 0, MT_THOK)
+			ghostcam.flags = MF_NOTHINK|MF_NOSECTOR|MF_NOBLOCKMAP|MF_NOCLIP|MF_NOCLIPHEIGHT|MF_NOCLIPTHING
+		end
+		NextWatch()
+	end
+
+	local ok, err = pcall(RunGhosts)
+	if not ok then
+		print("\x82WARNING:\x80 Ghost playback error", err)
+		if not errorghost then
+			print("...but which one was it!?")
+			return
+		end
+		local id = errorghost.recid
+		print("Deleting ghost "..id)
+		DeleteGhost(id)
+
+		StopPlaying(errorghost)
+		if not ghostwatching then
+			consoleplayer.awayviewtics = 0
+			consoleplayer.awayviewmobj = nil
 		end
 	end
 
