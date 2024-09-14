@@ -774,6 +774,7 @@ rawset(_G, "lb_ghost_start_playing", function(record)
 end)
 
 local function StopWatching()
+	if ghostwatching == nil then return end
 	ghostwatching = nil
 	consoleplayer.awayviewmobj = nil
 	consoleplayer.awayviewtics = 0
