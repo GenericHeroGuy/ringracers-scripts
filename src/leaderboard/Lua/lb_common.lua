@@ -85,6 +85,7 @@ local function djb2(message)
 
 	return digest
 end
+rawset(_G, "lb_djb2", djb2)
 
 -- Produce a checksum by using the maps title, subtitle and zone
 rawset(_G, "lb_map_checksum", function(mapnum)

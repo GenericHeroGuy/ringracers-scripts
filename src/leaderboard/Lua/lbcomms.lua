@@ -8,12 +8,17 @@
 ---- Imported functions ----
 
 -- lb_common.lua
+local StringReader = lb_string_reader
 local StringWriter = lb_string_writer
+local djb2 = lb_djb2
 
 -- lb_store.lua
 local ReadGhost = lb_read_ghost
 
 ----------------------------
+
+local RINGS = VERSION == 2
+local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
 
 local tohex = {}
 for i = 0, 255 do
@@ -81,38 +86,25 @@ end
 
 local sendPacket
 
+local ghostqueue = {} -- if server, the ghosts you are going to send
+
+local cv_debug = CV_RegisterVar({
+	name = "lb_comms_debug",
+	defaultvalue = "Off",
+	possiblevalue = CV_OnOff
+})
+local function debug(...)
+	if cv_debug.value then print(...) end
+end
+
 local packets = {
 	{
-		name = "start",
-		func = function(p, channel, data)
-			local target = data:byte(1)
-			local length = tonumber(data:sub(2))
-			if #me() == target then
-				--print("is for me?")
-				local rx = {
-					data = "",
-					state = "receiving",
-					channel = channel,
-					finallength = length,
-				}
-				table.insert(myconnections, rx)
-				sendPacket("ack", channel, "")
-			end
-		end,
-	},
-	{
-		name = "ack",
-		func = function(p, channel, data)
-			for _, tx in ipairs(myconnections) do
-				if tx.channel == channel and tx.state == "starting" then
-					tx.state = "sending"
-				end
-			end
-		end,
-	},
-	{
+		-- FIXME: this is pointless, just one client sending this is enough
+		-- get rid of this or actually handle dropped packets
+		-- plus the timeout tends to bug out if the server never gets this
 		name = "recvfinish",
 		func = function(p, channel, data)
+			if not isserver then return end
 			for _, tx in ipairs(myconnections) do
 				if tx.channel == channel then
 					if tx.callback then tx.callback(true) end
@@ -127,7 +119,9 @@ local packets = {
 		func = function(p, channel, data)
 			if p ~= server then
 				print("data from non server")
+				return
 			end
+			if isserver then return end
 			for _, rx in ipairs(myconnections) do
 				if rx.channel == channel and rx.state == "receiving" then
 					rx.data = $..data
@@ -135,81 +129,146 @@ local packets = {
 					if #rx.data == rx.finallength then
 						rx.state = false
 						sendPacket("recvfinish", channel, "")
-						if rx.callback then
+						if rx.ghost_checksum ~= nil and abs(djb2(rx.data)) ~= rx.ghost_checksum then
+							print("Checksum FAILED! Oh dear... better check server logs")
+							if rx.callback then
+								rx.callback(false)
+							end
+						elseif rx.callback then
 							rx.callback(true, rx.data)
 						end
-						--[[
-						local file = io.open("receive.png", "wb")
-						file:write(rx.data)
-						file:close()
-						--]]
 					end
 					return
 				end
 			end
+		end,
+	},
+	{
+		name = "filesend",
+		func = function(p, channel, data)
+			if not RINGS then
+				print("filesend on kart? no way!")
+				return
+			end
+			if p ~= server then
+				print("filesend from non server")
+				return
+			end
+			if isserver then return end
+			for _, rx in ipairs(myconnections) do
+				if rx.channel == channel and rx.state == "receiving" then
+					io.open("the filename here doesn't matter.sav2", "rb", function(file, name)
+						local data = file:read("*a")
+						rx.data = $..data
+						timeout[p] = 0
+						if #rx.data == rx.finallength then
+							rx.state = false
+							sendPacket("recvfinish", channel, "")
+							if rx.callback then
+								rx.callback(true, rx.data)
+							end
+						end
+					end)
+					return
+				end
+			end
+			debug("ignoring filesend")
+			io.open("not for us, but we still need to open it.sav2", "rb", do end)
 		end,
 	},
 	{
 		name = "getghosts",
 		func = function(p, channel, data)
-			local target = data:byte()
-			local recordid = tonumber(data:sub(2))
+			if not isserver then return end
+
+			local recordid = tonumber(data)
 			if not recordid then
 				print("Corrupted ghost request from "..p.name)
 				return
 			end
-			if #me() == target then
-				print(p.name.." requesting ghost for "..recordid)
-				if not isserver then
-					-- i'm not the server, i can't give you any ghosts!
-					print("not the server")
-					return
-				end
-				local maprecords = lb_get_map_records(gamemap, -1)
-				local ghostdata = StringWriter()
-				for mode, records in pairs(maprecords) do
-					for _, record in ipairs(records) do
-						if record.id == recordid then
-							-- gotcha!
-							local ghosts = ReadGhost(record)
-							if not ghosts then
-								--print("no ghosts saved")
-								return
-							end
-							for i, ghost in ipairs(ghosts) do
-								ghostdata:write8(i)
-								ghostdata:writenum(ghost.startofs)
-								ghostdata:writelstr(ghost.data)
-							end
+			print(p.name.." requesting ghost for "..recordid)
+
+			if ghostqueue[recordid] then
+				debug("already waiting")
+				return
+			end
+
+			local maprecords = lb_get_map_records(gamemap, -1)
+			local ghostdata = StringWriter()
+			for mode, records in pairs(maprecords) do
+				for _, record in ipairs(records) do
+					if record.id == recordid then
+						-- gotcha!
+						local ghosts = ReadGhost(record)
+						if not ghosts then
+							debug("no ghosts saved")
+							return
+						end
+						for i, ghost in ipairs(ghosts) do
+							ghostdata:write8(i)
+							ghostdata:writenum(ghost.startofs)
+							ghostdata:writelstr(ghost.data)
 						end
 					end
 				end
-				if not #ghostdata then print("no data"); return end
-				ghostdata = table.concat($)
-				local tx = {
-					data = ghostdata,
-					state = "sending",
-					channel = channel,
-					finallength = #ghostdata,
-					who = me(),
-				}
-				table.insert(myconnections, tx)
-				sendPacket("ghostack", channel, tostring(#ghostdata))
 			end
+			if not #ghostdata then debug("no data"); return end
+			ghostdata = table.concat($)
+
+			local tx = {
+				data = ghostdata,
+				state = "sending",
+				channel = totalconnections,
+				finallength = #ghostdata,
+				who = me(),
+				callback = function(ok)
+					debug(fmt("transfer finished for %d, result %s", recordid, tostring(ok)))
+					ghostqueue[recordid] = false
+				end
+			}
+			totalconnections = ($ + 1) % 256
+			table.insert(myconnections, tx)
+
+			local header = StringWriter()
+			header:writenum(recordid)
+			header:writenum(#ghostdata)
+			header:writenum(tx.channel) -- new channel for clients
+			header:writenum(abs(djb2(ghostdata))) -- checksum. why? well kart itself isn't gonna corrupt the data,
+			                                      -- but this spaghetti monster might... had an incident on day 1
+			                                      -- where i received a ghost with 1.5 packets worth of data?????
+			sendPacket("ghostack", channel, table.concat(header))
+
+			ghostqueue[recordid] = true
+			debug(fmt("starting ghost %d on channel %d", recordid, tx.channel))
 		end,
 	},
 	{
 		name = "ghostack",
 		func = function(p, channel, data)
-			local ghostlen = tonumber(data)
+			if p ~= server then
+				print("ghostack from non server")
+				return
+			end
+			if isserver then return end
+
+			data = StringReader($)
+			local recordid = data:readnum()
+			local ghostlen = data:readnum()
+			local newchannel = data:readnum() -- server decides the channel
+			local checksum = data:readnum()
 			for _, rx in ipairs(myconnections) do
-				if rx.channel == channel and rx.state == "starting" then
+				if rx.ghost_recid == recordid and rx.state == "starting" then
+					debug("look! it's "..recordid)
 					rx.state = "receiving"
-					timeout[p] = 0
+					rx.channel = newchannel
 					rx.finallength = ghostlen
-					rx.who = p
+					rx.ghost_checksum = checksum
+					timeout[server] = 0
+					debug("switching to channel "..newchannel)
+					return
 				end
 			end
+			debug("i don't need "..recordid)
 		end,
 	},
 }
@@ -227,9 +286,8 @@ function sendPacket(type, channel, data)
 end
 
 COM_AddCommand("\x7f", function(p, data)
-	data = base128decode(data)
-	local ptype = data:byte(1)
-	local channel = data:byte(2)
+	data = base128decode($)
+	local ptype, channel = data:byte(1, 2)
 	if not packets[ptype] then
 		print("unknown packet type "..tostring(ptype))
 		return
@@ -252,8 +310,7 @@ local function startTransfer(data, ptype, callback)
 	table.insert(myconnections, tx)
 	timeout[server] = 0
 
-	-- XXX: %c format doesn't handle zeroes. good luck convincing anyone to upgrade to Lua 5.2
-	sendPacket(ptype, tx.channel, string.char(#server)..fmt("%d", #data))
+	sendPacket(ptype, tx.channel, fmt("%d", #data))
 end
 
 local function startReceiver(data, ptype, callback)
@@ -269,6 +326,7 @@ local function startReceiver(data, ptype, callback)
 	timeout[server] = 0
 
 	sendPacket(ptype, rx.channel, data)
+	return rx
 end
 
 local cv_bandwidth = CV_RegisterVar({
@@ -279,10 +337,20 @@ local cv_bandwidth = CV_RegisterVar({
 
 local cv_timeout = CV_RegisterVar({
 	name = "lb_comms_timeout",
-	defaultvalue = TICRATE/3,
-	possiblevalue = { MIN = TICRATE/10, MAX = TICRATE }
+	defaultvalue = TICRATE/2,
+	possiblevalue = { MIN = TICRATE/4, MAX = TICRATE*5 }
 })
 
+local cv_filetransfer
+if RINGS then
+	cv_filetransfer = CV_RegisterVar({
+		name = "lb_comms_filetransfer",
+		defaultvalue = "On",
+		possiblevalue = CV_OnOff
+	})
+end
+
+local filesending = false
 local function transferThinker()
 	local sent = false
 
@@ -308,12 +376,27 @@ local function transferThinker()
 			-- send a slice
 			if sent then
 			elseif #tx.data then
-				local bw = base128shrink(cv_bandwidth.value)
-				local chunk = tx.data:sub(1, bw)
-				tx.data = tx.data:sub(bw+1)
-				sendPacket("send", tx.channel, chunk)
-				timeout[tx.who] = 0
-				sent = true
+				if cv_filetransfer and cv_filetransfer.value then
+					if filesending then continue end
+					local f = io.openlocal("commstmp.sav2", "wb")
+					f:write(tx.data)
+					f:close()
+					tx.state = false
+					debug("FILE SEND GO")
+					io.open("commstmp.sav2", "rb", function()
+						filesending = false
+						tx.callback()
+					end)
+					sendPacket("filesend", tx.channel, "")
+					filesending = true
+				else
+					local bw = base128shrink(cv_bandwidth.value)
+					local chunk = tx.data:sub(1, bw)
+					tx.data = tx.data:sub(bw+1)
+					sendPacket("send", tx.channel, chunk)
+					timeout[tx.who] = 0
+					sent = true
+				end
 			else
 				tx.state = "recvack"
 			end
@@ -330,19 +413,17 @@ end
 addHook("ThinkFrame", transferThinker)
 
 local function RequestGhosts(id, callback)
-	startReceiver(string.char(#server)..tostring(id), "getghosts", callback)
+	for _, rx in ipairs(myconnections) do
+		if rx.ghost_recid == id then
+			debug("Already asked for "..id)
+			return
+		end
+	end
+	debug("Requesting ghost "..id)
+	local rec = startReceiver(tostring(id), "getghosts", callback)
+	rec.ghost_recid = id
 end
 rawset(_G, "lb_request_ghosts", RequestGhosts)
-
---[[
-COM_AddCommand("testtransfer", function(p, data)
-	local file, err = io.open("input.png", "rb")
-	if not file then return print(err) end
-	data = file:read("*a")
-	file:close()
-	startTransfer(data, "start", function(ok) print("done "..tostring(ok)) end)
-end, COM_LOCAL)
---]]
 
 hud.add(function(v, p)
 	for i, tx in ipairs(myconnections) do
@@ -352,7 +433,7 @@ hud.add(function(v, p)
 		else
 			str = str..fmt("%d", #tx.data)
 		end
-		v.drawString(0, 200-i*4, str, V_SNAPTOBOTTOM|V_SNAPTOLEFT|V_ALLOWLOWERCASE|V_HUDTRANSHALF, "small")
+		v.drawString(0, 200-i*4, str, V_SNAPTOBOTTOM|V_SNAPTOLEFT|V_ALLOWLOWERCASE|V_50TRANS, "small")
 		break
 	end
 end)
