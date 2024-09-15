@@ -30,6 +30,8 @@ local cv_showallstats = CV_RegisterVar({
 	possiblevalue = CV_OnOff,
 })
 
+rawset(_G, "lb_cv_showallstats", cv_showallstats)
+
 local cv_kartencore
 
 local cv_highresportrait
@@ -351,7 +353,7 @@ local function drawStats(v, x, y, skin, stats)
 	-- Highlight restat if all stats are shown
 	if cv_showallstats.value and not matchskinstats then
 		color = "\130"
-	end
+    end
 
 	if stats
 		and (not matchskinstats

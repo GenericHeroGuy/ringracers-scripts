@@ -518,7 +518,7 @@ COM_AddCommand("records", function(player, mapid)
 	end
 end, COM_LOCAL)
 
-COM_AddCommand("changelevel", function(player, map)
+COM_AddCommand("changelevel", function(player, ...)
 	if not doyoudare(player) then
 		return
 	end
@@ -984,6 +984,36 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 			v.drawFill(x, y, 1, 1, 128)
 		end
 
+		-- Stats
+		local stat = p["stat"]
+		local pskin = p["skin"] and skins[p["skin"]]
+
+		local color = ""
+
+		if not stat and lb_cv_showallstats.value and pskin then
+			stat = (s.kartspeed<<4) | s.kartweight
+		end
+
+		local matchskinstats = stat and pskin and (pskin.kartspeed == (stat & MSK_SPEED) >> 4) and (pskin.kartweight == stat & MSK_WEIGHT)
+
+		-- Highlight restat if all stats are shown
+		if lb_cv_showallstats.value and not matchskinstats then
+			color = "\130"
+		end
+
+		if stat and (not matchskinstats or lb_cv_showallstats.value) then
+			local spd_yoff = 4
+			local acc_yoff = 8
+
+			if cv_smallhud.value then
+				spd_yoff = 3
+				acc_yoff = 8
+			end
+
+			v.drawString(x + frdim - 2, y + spd_yoff, color..((stat & MSK_SPEED) >> 4), V_HUDTRANS | VFLAGS, "small")
+			v.drawString(x + frdim - 2, y + acc_yoff, color..(stat & MSK_WEIGHT), V_HUDTRANS | VFLAGS, "small")
+		end
+
 		x = x + 17
 	end
 	x = x - 17
@@ -1044,27 +1074,6 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 				V_HUDTRANS | VFLAGS
 			)
 		end
-	end
-
-	-- Stats
-	local stat = score["stat"]
-	local pskin = score["skin"] and skins[score["skin"]]
-	if stat and not (
-			pskin
-			and pskin.kartweight == stat & MSK_WEIGHT
-			and pskin.kartspeed == (stat & MSK_SPEED) >> 4
-		) then
-
-		local spd_yoff = 4
-		local acc_yoff = 8
-
-		if cv_smallhud.value then
-			spd_yoff = 3
-			acc_yoff = 8
-		end
-
-		v.drawString(x + frdim - 2, y + spd_yoff, (stat & MSK_SPEED) >> 4, V_HUDTRANS | VFLAGS, "small")
-		v.drawString(x + frdim - 2, y + acc_yoff, stat & MSK_WEIGHT, V_HUDTRANS | VFLAGS, "small")
 	end
 
 	if gui == GUI_ON or (gui == GUI_SPLITS and showSplit) then
