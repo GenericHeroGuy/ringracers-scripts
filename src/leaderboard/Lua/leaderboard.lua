@@ -519,13 +519,46 @@ COM_AddCommand("records", function(player, mapid)
 end, COM_LOCAL)
 
 COM_AddCommand("changelevel", function(player, map)
-	if not doyoudare(player) or leveltime < 20 then
+	if not doyoudare(player) then
+		return
+	end
+	if leveltime < 20 then
 		return
 	end
 
-	if map == nil then
-		CONS_Printf(player, "Usage: changelevel MAPXX")
+	local search = ...
+	local map, lvlttl
+
+	if search == nil then
+		CONS_Printf(player, "Usage: changelevel MAPXX or Map Name")
 		return
+	end
+
+	if not string.find(search:lower(), "map") then --don´t need to search stuff if someone uses MAPXX with this
+		for i = 1, #mapheaderinfo do
+			map = mapheaderinfo[i]
+			if map == nil then
+				continue
+			end
+
+			lvlttl = map.lvlttl + zoneAct(map)
+
+			if lvlttl:lower():find(search:lower()) then
+				map = G_BuildMapName(i)
+				if map ~= nil then --found our map so bail outta the lööp
+					break
+				end
+			end
+		end
+
+		if map == nil then
+			CONS_Printf(player, string.format("Map doesn't exist: %s", search))
+			return
+		end
+	end
+
+	if map == nil then
+		map = ...
 	end
 
 	local mapnum = mapnumFromExtended(map)
