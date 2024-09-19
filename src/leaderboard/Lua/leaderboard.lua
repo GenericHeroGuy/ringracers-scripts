@@ -50,7 +50,6 @@ local RingsSpawn = lb_rings_spawn
 local RINGS = VERSION == 2
 local TURNING = RINGS and "turning" or "driftturn"
 local RACETOL = RINGS and TOL_RACE or TOL_RACE | TOL_SP
-local BATTLETOL = RINGS and TOL_BATTLE or TOL_MATCH | TOL_COOP
 local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
 
 -- Holds the current maps records table including all modes
@@ -372,7 +371,7 @@ COM_AddCommand("levelselect", function(player)
 	if not doyoudare(player) then return end
 
 	-- TODO: allow in battle
-	if mapheaderinfo[gamemap].typeoflevel & BATTLETOL then
+	if mapheaderinfo[gamemap].typeoflevel & (RINGS and TOL_BATTLE or TOL_MATCH) then
 		CONS_Printf(player, "Please exit battle first")
 		return
 	end
@@ -403,6 +402,10 @@ COM_AddCommand("findmap", function(player, search)
 		[TOL_RACE] = "\x88Race\x80",
 		[TOL_MATCH] = "\x87\Battle\x80"
 	}
+	local tolmask = 0
+	for k in pairs(tol) do
+		tolmask = $ | k
+	end
 	local lvltype, map, lvlttl
 
 	for i = 1, #mapheaderinfo do
@@ -414,7 +417,7 @@ COM_AddCommand("findmap", function(player, search)
 		lvlttl = map.lvlttl + zoneAct(map)
 
 		if not search or lvlttl:lower():find(search:lower()) then
-			lvltype = tol[map.typeoflevel] or map.typeoflevel
+			lvltype = tol[map.typeoflevel & tolmask] or map.typeoflevel
 
 			-- If race print numlaps
 			lvltype = not (map.typeoflevel & RACETOL) and lvltype
@@ -1449,8 +1452,8 @@ local function saveTime(player)
 			ghosts = nil
 		end
 		local rs = RINGS and p.hostmod and p.hostmod.restat
-		local speed = rs.speed or p.HMRs or pskin.kartspeed
-		local weight = rs.weight or p.HMRw or pskin.kartweight
+		local speed = rs and rs.speed or p.HMRs or pskin.kartspeed
+		local weight = rs and rs.weight or p.HMRw or pskin.kartweight
 		table.insert(players, player_t(
 			p.name,
 			p.mo.skin,
@@ -1609,13 +1612,15 @@ local function think()
 
 	if leveltime < START_TIME then
 		-- Help message
-		if leveltime == START_TIME - TICRATE * 3 then
-			if help then
-				help = false
-				chatprint(HELP_MESSAGE, true)
-			else
-				help = true
-			end
+		local anyone = false
+		for p in players.iterate do
+			if not p.spectator then anyone = true; break end
+		end
+		if help and anyone and leveltime == START_TIME - TICRATE * 3 then
+			chatprint(HELP_MESSAGE, true)
+			help = false
+		elseif not anyone then
+			help = true
 		end
 
 		-- Autospec
