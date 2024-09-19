@@ -15,6 +15,7 @@ local StringReader = lb_string_reader
 local drawNum = lb_draw_num
 local getThrowDir = lb_throw_dir
 local ghost_t = lb_ghost_t
+local mapNameAndSum = lb_mapname_and_checksum
 
 -- browser.lua
 local InitBrowser = InitBrowser
@@ -27,6 +28,8 @@ local SaveRecord = lb_save_record
 local MapList = lb_map_list
 local MoveRecords = lb_move_records
 local WriteGhost = lb_write_ghost
+local RecordByID = lb_rec_by_id
+local IDsForMap = lb_ids_for_map
 
 -- bghost.lua
 local GhostStartRecording = lb_ghost_start_recording
@@ -740,34 +743,56 @@ COM_AddCommand("rival", function(player, rival, page)
 	))
 end, COM_LOCAL)
 
-COM_AddCommand("lb_move_records", function(player, from, to)
+local function getSourceRecords(from)
+	local map, checksum, ids
+	local id = tonumber(from)
+	if id ~= nil then
+		-- individual record
+		ids, map, checksum = RecordByID(id)
+		if not ids then
+			return nil, string.format("error: invalid record ID %d", id)
+		end
+		ids = { [ids.id] = true }
+	else
+		-- all records from a map
+		map, checksum = mapnumFromExtended(from)
+
+		if not map then
+			return nil, string.format("error: invalid map %s", from:upper())
+		end
+
+		if RINGS and not checksum then
+			checksum = mapChecksum(map)
+		end
+		if not checksum then
+			return nil, string.format("error: %s checksum for %s", checksum == false and "invalid" or "missing", from:upper())
+		end
+
+		ids = IDsForMap(map, checksum)
+		if not next(ids) then
+			return nil, string.format("error: no records found for %s", from:upper())
+		end
+	end
+	return map, checksum, ids
+end
+
+COM_AddCommand("lb_move", function(player, from, to)
 	if not (from and to) then
 		CONS_Printf(player,
-			"\x82Usage:\x80 lb_move_records <from> <to>\n"..
+			"\x82Usage:\x80 lb_move <from map/id> <to map>\n"..
 			"\x82Summary:\x80 Move records from one map to another.\n"..
-			"If no checksum is supplied for <to>, the loaded map's checksum is used.\n"..
+			"If no checksum is supplied for <to map>, the loaded map's checksum is used.\n"..
 			(RINGS and "" or "\x82Hint:\x80 Use lb_known_maps to find checksums")
 		)
 		return
 	end
 
-	local sourcemap, sourcesum = mapnumFromExtended(from)
-	local targetmap, targetsum = mapnumFromExtended(to)
+	local sourcemap, sourcesum, sourceids = getSourceRecords(from)
+	if not sourcemap then return CONS_Printf(player, sourcesum) end
 
-	if not sourcemap then
-		CONS_Printf(player, string.format("error: invalid map %s", from:upper()))
-		return
-	end
+	local targetmap, targetsum = mapnumFromExtended(to)
 	if not targetmap then
 		CONS_Printf(player, string.format("error: invalid map %s", to:upper()))
-		return
-	end
-
-	if RINGS then
-		sourcesum = mapChecksum(sourcemap)
-	end
-	if not sourcesum then
-		CONS_Printf(player, string.format("error: %s checksum for %s", sourcesum == false and "invalid" or "missing", from:upper()))
 		return
 	end
 
@@ -780,52 +805,42 @@ COM_AddCommand("lb_move_records", function(player, from, to)
 		return
 	end
 
-	local recordCount = MoveRecords(sourcemap, sourcesum, targetmap, targetsum, ST_SEP)
+	local recordCount = MoveRecords(sourcemap, sourcesum, sourceids, targetmap, targetsum, ST_SEP)
 
 	CONS_Printf(
 		player,
 		string.format(
-			"%d records have been moved from\x82 %s\x80 to\x88 %s",
+			"%d record%s have been moved from\x82 %s\x80 to\x88 %s",
 			recordCount,
-			from,
-			to
+			recordCount ~= 1 and "s" or "",
+			mapNameAndSum(sourcemap, sourcesum),
+			mapNameAndSum(targetmap, targetsum)
 		)
 	)
 end, COM_ADMIN)
 
-COM_AddCommand("lb_delete_records", function(player, from)
+COM_AddCommand("lb_delete", function(player, from)
 	if not from then
 		CONS_Printf(player,
-			"\x82Usage:\x80 lb_delete_records <from>\n"..
-			"\x82Summary:\x80 Deletes records from the given map.\n"..
+			"\x82Usage:\x80 lb_delete <from map/id>\n"..
+			"\x82Summary:\x80 Deletes records from the given map, or an individual record.\n"..
 			(RINGS and "" or "\x82Hint:\x80 Use lb_known_maps to find checksums")
 		)
 		return
 	end
 
-	local sourcemap, sourcesum = mapnumFromExtended(from)
+	local sourcemap, sourcesum, sourceids = getSourceRecords(from)
+	if not sourcemap then return CONS_Printf(player, sourcesum) end
 
-	if not sourcemap then
-		CONS_Printf(player, string.format("error: invalid map %s", from:upper()))
-		return
-	end
-
-	if RINGS then
-		sourcesum = mapChecksum(sourcemap)
-	end
-	if not sourcesum then
-		CONS_Printf(player, string.format("error: %s checksum for %s", sourcesum == false and "invalid" or "missing", from:upper()))
-		return
-	end
-
-	local recordCount = MoveRecords(sourcemap, sourcesum, -1, nil, ST_SEP)
+	local recordCount = MoveRecords(sourcemap, sourcesum, sourceids, -1, nil, ST_SEP)
 
 	CONS_Printf(
 		player,
 		string.format(
-			"Deleted %d records from \x82%s",
+			"Deleted %d record%s from \x82%s",
 			recordCount,
-			from
+			recordCount ~= 1 and "s" or "",
+			mapNameAndSum(sourcemap, sourcesum)
 		)
 	)
 end, COM_ADMIN)

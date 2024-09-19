@@ -145,6 +145,14 @@ rawset(_G, "lb_mapnum_from_extended", function(map)
 	return mapnum, checksum
 end)
 
+rawset(_G, "lb_mapname_and_checksum", function(map, checksum)
+	if RINGS then
+		return G_BuildMapName(map)
+	else
+		return string.format("%s:%s", G_BuildMapName(map), checksum)
+	end
+end)
+
 -- ...throwdir!? what happened to BT_FORWARD/BT_BACKWARD?
 -- well you might be surprised to learn that throwdir exists in both games :^)
 -- so it's the least troublesome way to get up/down inputs

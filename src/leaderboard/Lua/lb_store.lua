@@ -551,10 +551,36 @@ local function AddColdStoreBinary(str)
 end
 rawset(_G, "lb_add_coldstore_binary", AddColdStoreBinary)
 
+-- yikes... that's a whole lot of pairs...
+local function getRecordByID(id)
+	for map, checksums in pairs(LiveStore) do
+		for checksum, records in pairs(checksums) do
+			for _, record in ipairs(records) do
+				if record.id == id then
+					return record, map, checksum
+				end
+			end
+		end
+	end
+end
+rawset(_G, "lb_rec_by_id", getRecordByID)
+
+local function getIdsForMap(map, checksum)
+	local ret = {}
+	if not (LiveStore[map] and LiveStore[map][checksum]) then
+		return ret
+	end
+	for _, record in ipairs(LiveStore[map][checksum]) do
+		ret[record.id] = true
+	end
+	return ret
+end
+rawset(_G, "lb_ids_for_map", getIdsForMap)
+
 -- GLOBAL
 -- Command for moving records from one map to another
 -- if targetmap is -1, deletes records
-local function moveRecords(sourcemap, sourcesum, targetmap, targetsum, modeSep)
+local function moveRecords(sourcemap, sourcesum, sourceids, targetmap, targetsum, modeSep)
 	if not (LiveStore[sourcemap] and LiveStore[sourcemap][sourcesum]) then
 		return 0
 	end
@@ -565,17 +591,26 @@ local function moveRecords(sourcemap, sourcesum, targetmap, targetsum, modeSep)
 		LiveStore[targetmap] = $ or {}
 		LiveStore[targetmap][targetsum] = $ or {}
 	end
+	local moved = 0
 	for i, score in ipairs(LiveStore[sourcemap][sourcesum]) do
+		if not sourceids[score.id] then continue end
 		if isserver then Dirty[score.id] = true end
 		if not delete then insertOrReplace(LiveStore[targetmap][targetsum], score, modeSep) end
+		moved = $ + 1
 	end
-	local moved = #LiveStore[sourcemap][sourcesum]
 
 	-- Destroy the original table
-	for _, record in ipairs(LiveStore[sourcemap][sourcesum]) do
-		deleteGhost(record.id)
+	local records = LiveStore[sourcemap][sourcesum]
+	for i = #records, 1, -1 do
+		local rec = records[i]
+		if sourceids[rec.id] then
+			table.remove(records, i)
+			deleteGhost(rec.id)
+		end
 	end
-	LiveStore[sourcemap][sourcesum] = nil
+	if not next(records) then
+		LiveStore[sourcemap][sourcesum] = nil
+	end
 
 	if isserver then
 		dumpStoreToFile()
