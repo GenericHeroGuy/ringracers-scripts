@@ -357,6 +357,7 @@ local GS_GETRING = 0x9c -- RING
 local GS_GETSEVEN = 0x9d -- 7
 local GS_GETJACKPOT = 0x9e -- JACKPOT!
 local GS_SUPERRING = 0x9f -- RR ring award (1 parameter byte)
+local GS_GRAVFLIP = 0xa0 -- gravity flip
 
 local GSB_FASTLINES = 0x40 -- go fast
 
@@ -561,6 +562,10 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 	testspec(GS_ACROTRICK, tricked, ghost.lasttricked)
 	ghost.lasttricked = tricked
 
+	local gravflip = player.mo.eflags & MFE_VERTICALFLIP
+	testspec(GS_GRAVFLIP, gravflip, ghost.lastgravflip)
+	ghost.lastgravflip = gravflip
+
 	if dofastlines then
 		if specials[1] then
 			specials[1] = $ | GSB_FASTLINES
@@ -671,6 +676,7 @@ local function StartRecording(player)
 		lasttricked = false,
 		lastsuperring = 0,
 		lastringboxdelay = 0,
+		lastgravflip = 0,
 
 		momlog = { x = 0, y = 0, z = 0, a = 0 },
 		errorx = 0,
@@ -850,6 +856,7 @@ local function StartPlaying(record)
 			ringaward = 0,
 			nextringaward = 0,
 			fakeawardtimer = 0,
+			gravityflip = false,
 		}, { __index = do error("no", 2) end, __newindex = do error("no", 2) end })
 		table.insert(reps, rep)
 		replayers[rep] = true
@@ -923,6 +930,13 @@ local function SpawnDriftSparks(r, direction)
 	if leveltime % 2 == 1 then
 		return
 	end
+	if not RINGS then
+		if r.mo.eflags & MFE_VERTICALFLIP and r.mo.z + r.mo.height < r.mo.ceilingz - mapobjectscale*8 then
+			return
+		elseif not (r.mo.eflags & MFE_VERTICALFLIP) and r.mo.z > r.mo.floorz + mapobjectscale*8 then
+			return
+		end
+	end
 
 	local pmo = r.mo
 	local color
@@ -953,6 +967,7 @@ local function SpawnDriftSparks(r, direction)
 		spark.color = color
 
 		K_MatchGenericExtraFlags(spark, pmo)
+		P_SetOrigin(spark, spark.x, spark.y, spark.z) -- interp moment
 		spark.frame = $ | FF_TRANS10
 		spark.tics = $ - 1
 	end
@@ -974,13 +989,14 @@ end
 local function SpawnFastLines(r)
 	local fast = P_SpawnMobj(r.mo.x + (randomrange(-36,36) * r.mo.scale),
 		r.mo.y + (randomrange(-36,36) * r.mo.scale),
-		r.mo.z + (r.mo.height/2) + (randomrange(-20,20) * r.mo.scale),
+		r.mo.z + (r.mo.height/2 + (randomrange(-20,20) * r.mo.scale))*P_MobjFlip(r.mo),
 		MT_FASTLINE)
 	fast.angle = R_PointToAngle2(0, 0, r.gmomx, r.gmomy)
 	fast.momx = 3*r.gmomx/4
 	fast.momy = 3*r.gmomy/4
 	fast.momz = 3*r.gmomz/4
 	K_MatchGenericExtraFlags(fast, r.mo)
+	P_SetOrigin(fast, fast.x, fast.y, fast.z) -- interp moment
 end
 
 local function MoveCombiLink(r)
@@ -1020,6 +1036,7 @@ local function SpawnAIZDust(r, direction)
 	//spark.momz = r.gmomz/2
 
 	K_MatchGenericExtraFlags(spark, r.mo)
+	P_SetOrigin(spark, spark.x, spark.y, spark.z) -- interp moment
 end
 
 local function SpawnSpindashDust(r)
@@ -1097,6 +1114,7 @@ local booleans = {
 	[GS_TRICKCHARGE] = "trickcharged",
 	[GS_DEATH] = "dead",
 	[GS_ACROTRICK] = "acrotrick",
+	[GS_GRAVFLIP] = "gravityflip",
 }
 
 local errorghost
@@ -1211,7 +1229,7 @@ local function RunGhosts()
 				dir = -1
 			end
 			r.driftdir = dir or $ -- for sliptide
-			if r.driftspark and (RINGS or r.mo.z < r.mo.floorz + mapobjectscale*8) then
+			if r.driftspark then
 				SpawnDriftSparks(r, r.driftdir)
 			end
 			if r.fastlines then
@@ -1348,6 +1366,12 @@ local function RunGhosts()
 				-- i REALLY need to rethink frame specials
 				r.mo.angle = $ + (ANG30*(leveltime%12))
 			end
+
+			if r.gravityflip then
+				r.mo.eflags = $ | MFE_VERTICALFLIP
+			else
+				r.mo.eflags = $ & ~MFE_VERTICALFLIP
+			end
 		else
 			--print("Finished")
 			StopPlaying(r)
@@ -1431,8 +1455,8 @@ addHook("ThinkFrame", function()
 			r.angofs = 3*r.angofs/4
 		end
 
-		local dist = 160*mapobjectscale
-		local height = 95*mapobjectscale
+		local dist = 170*mapobjectscale
+		local height = 80*mapobjectscale
 
 		local inputofs = 0
 		if consoleplayer.cmd[TURNING] >= 200 then
@@ -1451,17 +1475,17 @@ addHook("ThinkFrame", function()
 		elseif throwdir == -1 then -- BT_BACKWARD
 			inputofs = inputofs/2 + ANGLE_180
 		end
+		if r.gravityflip then height = -$ end
 
 		local camangle = r.realangle + r.angofs + inputofs
 		P_MoveOrigin(ghostcam,
 			r.mo.x - P_ReturnThrustX(camangle, dist) - P_ReturnThrustX(camangle+ANGLE_90, FixedMul(r.angofs, mapobjectscale/128)),
 			r.mo.y - P_ReturnThrustY(camangle, dist) - P_ReturnThrustY(camangle+ANGLE_90, FixedMul(r.angofs, mapobjectscale/128)),
-			r.mo.z + height - (not RINGS and 20*FRACUNIT or 0)
+			r.mo.z + height - (not RINGS and 20*FRACUNIT or 0) + r.mo.height/2
 		)
 		ghostcam.angle = camangle
 		consoleplayer.awayviewmobj = ghostcam
-		local pitch = -R_PointToAngle2(0, 0, dist, height)
-		pitch = $ + ANG20
+		local pitch = -R_PointToAngle2(0, 0, dist, height/2)
 		if RINGS then
 			ghostcam.pitch = pitch
 		else
