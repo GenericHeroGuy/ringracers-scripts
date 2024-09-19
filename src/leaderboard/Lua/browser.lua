@@ -100,7 +100,7 @@ local scoresY =  ttlY + 16
 
 local sin = sin
 local function drawMapPatch(v, offset)
-	local scale = FRACUNIT / (abs(offset) + scalar)
+	local scale = FRACUNIT / (abs(offset) + scalar) / (RINGS and 2 or 1)
 	local mapName = G_BuildMapName(getMap(offset))
 	local patchName = mapName.."P"
 	local mapp = v.patchExists(patchName) and v.cachePatch(patchName) or v.cachePatch("BLANKLVL")
@@ -137,8 +137,8 @@ local function drawEncore(v)
 end
 
 local colors = {
-	[0] = 0,
-	[1] = 215
+	[0] = RINGS and 1 or 0, -- TIL indices 0-6 are brighter in 2.2
+	[1] = RINGS and 133 or 215
 }
 local function drawMapBorder(v)
 	local mapWidth = FixedMul(160, FRACUNIT / scalar)
@@ -523,7 +523,7 @@ local repeatCount = 0
 local keyRepeat = 0
 
 local function updateKeyRepeat()
-	S_StartSound(nil, 143)
+	S_StartSound(nil, sfx_ptally)
 	if repeatCount < 1 then
 		keyRepeat = TICRATE / 4
 	else
@@ -557,7 +557,7 @@ local function controller(player)
 		updateKeyRepeat()
 
 		if cmd.buttons & BT_BRAKE then
-			S_StartSound(nil, 115)
+			S_StartSound(nil, sfx_pop)
 			return true
 		elseif cmd.buttons & BT_ACCELERATE then
 			COM_BufInsertText(player, "changelevel "..G_BuildMapName(maps[mapIndex]))

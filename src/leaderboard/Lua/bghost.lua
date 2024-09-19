@@ -348,11 +348,22 @@ local GS_TRICKED = 0x93 -- CATHOLOCISM BLAST!
 local GS_TRICKCHARGE = 0x94 -- RR trick charge
 local GS_DEATH = 0x95 -- RR death sprite (i'm outta fakestates so...)
 local GS_ACROTRICK = 0x96 -- acrobasics trick spin
+local GS_FAILSAFEBOOST = 0x97 -- RR failsafe boost
+local GS_RINGBOX = 0x98 -- RR ringbox roulette
+local GS_GETBAR = 0x99 -- BAR
+local GS_GETBAR2 = 0x9a -- BAR2
+local GS_GETBAR3 = 0x9b -- BAR3
+local GS_GETRING = 0x9c -- RING
+local GS_GETSEVEN = 0x9d -- 7
+local GS_GETJACKPOT = 0x9e -- JACKPOT!
+local GS_SUPERRING = 0x9f -- RR ring award (1 parameter byte)
 
 local GSB_FASTLINES = 0x40 -- go fast
 
 local tins = table.insert
-local pickupring = {}
+local pickupring
+local pickupbox
+local pickupfailsafe -- this name doesn't even make sense but might as well follow the theme
 
 local function WriteGhostTic(ghost, player, x, y, z, angle)
 	local flags = WriteFakeFrame(ghost, player)
@@ -510,6 +521,38 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 		local fastfall = player.fastfall
 		testspec(GS_FASTFALL, fastfall, ghost.lastfastfall)
 		ghost.lastfastfall = fastfall
+
+		local gotbox = pickupbox[player]
+		if gotbox == true then
+			tins(specials, GS_ROULETTE)
+		end
+		if gotbox == false then
+			tins(specials, GS_RINGBOX)
+		end
+
+		local delay = player.ringboxdelay
+		if delay and not ghost.lastringboxdelay then
+			tins(specials, GS_GETBAR + player.ringboxaward)
+		end
+		ghost.lastringboxdelay = delay
+
+		local superring = player.superring
+		if superring > ghost.lastsuperring then
+			if superring > 255 then
+				print("That's a lot of rings! How am I supposed to fit that in just a byte???")
+			else
+				tins(specials, GS_SUPERRING)
+				tins(specials, superring)
+			end
+		end
+		ghost.lastsuperring = superring
+
+		local usedfailsafe = pickupfailsafe[player]
+		if usedfailsafe then
+			tins(specials, GS_FAILSAFEBOOST)
+		end
+
+		-- XXX: there is literally no way to tell if the roulette gets cancelled
 	end
 
 	-- acro support!
@@ -538,19 +581,75 @@ end
 if RINGS then
 -- oh boy, gotta detect ring usage
 local maybering
+-- and air failsafes
+local maybefailsafe
+local prevfailsafe = {}
 addHook("PreThinkFrame", function()
+	if not LB_IsRunning() then return end
 	maybering = nil
+	maybefailsafe = nil
 	pickupring = {}
+	-- and item box pops
+	pickupbox = {}
+	pickupfailsafe = {}
+	for p in players.iterate do
+		prevfailsafe[p] = p.pflags & PF_AIRFAILSAFE
+	end
 end)
 addHook("MobjSpawn", function(mo)
 	maybering = mo
 end, MT_RING)
+addHook("MobjSpawn", function(mo)
+	maybefailsafe = mo
+end, MT_DRIFTEXPLODE)
 addHook("PlayerThink", function(p)
+	if not LB_IsRunning() then return end
 	if maybering and maybering.extravalue2 == 1 and maybering.state == S_FASTRING1 then
 		pickupring[p] = true
 	end
+	if maybefailsafe and maybefailsafe.extravalue1 == 0 and not (p.pflags & PF_AIRFAILSAFE) and prevfailsafe[p] then
+		pickupfailsafe[p] = true
+	end
 	maybering = nil
+	maybefailsafe = nil
 end)
+
+local function P_IsPickupCheesy(player, type)
+	if CV_FindVar("debugcheese").value then
+		return false
+	end
+
+	if gametyperules & GTR_CATCHER then
+		return false
+	end
+
+	if player.lastpickupdistance and player.lastpickuptype == type then
+		-- unsigned? no thanks, i'll just skip ringbox specials
+		if player.distancetofinish < 0 or player.lastpickupdistance < 0 then
+			return true
+		end
+		local distancedelta = player.lastpickupdistance - player.distancetofinish
+		if distancedelta < 2500
+			return true
+		end
+	end
+	return false
+end
+addHook("TouchSpecial", function(special, toucher)
+	if not LB_IsRunning() then return end
+	local player = toucher.player
+	local cheesetype = (special.flags2 & MF2_BOSSDEAD) and 2 or 1 // perma ring box
+
+	if not P_CanPickupItem(player, 1) then
+		return
+	end
+	if P_IsPickupCheesy(player, cheesetype) then
+		return
+	end
+
+	local specialstate = special.state
+	pickupbox[player] = specialstate >= S_RANDOMITEM1 and specialstate <= S_RANDOMITEM12
+end, MT_RANDOMITEM)
 end -- if RINGS
 
 -- start recording ghost data for player
@@ -570,6 +669,8 @@ local function StartRecording(player)
 		lasttrickcharge = false,
 		lastdeath = false,
 		lasttricked = false,
+		lastsuperring = 0,
+		lastringboxdelay = 0,
 
 		momlog = { x = 0, y = 0, z = 0, a = 0 },
 		errorx = 0,
@@ -744,6 +845,11 @@ local function StartPlaying(record)
 			trickaura = false,
 			dead = false,
 			acrotrick = false,
+			-- i don't like making assumptions, but i don't have much better options
+			-- for showing ring awards, so... lua scripts be damned
+			ringaward = 0,
+			nextringaward = 0,
+			fakeawardtimer = 0,
 		}, { __index = do error("no", 2) end, __newindex = do error("no", 2) end })
 		table.insert(reps, rep)
 		replayers[rep] = true
@@ -1029,9 +1135,20 @@ local function RunGhosts()
 						r.hasitem = 0
 					end
 				elseif flags == GS_USERING then
-					SpawnRing(r)
+					SpawnRing(r, true)
 				elseif flags >= GS_NOITEM and flags <= GS_GETITEM then
 					r.hasitem = flags - GS_NOITEM
+				elseif flags >= GS_RINGBOX and flags <= GS_GETJACKPOT then
+					r.hasitem = GS_RINGBOX - flags - 1 -- we're going negative folks!
+					r.fakeawardtimer = TICRATE
+				elseif flags == GS_SUPERRING then
+					r.ringaward = r.file:read8()
+				elseif flags == GS_FAILSAFEBOOST then
+					local dust = P_SpawnMobj(r.mo.x, r.mo.y, r.mo.z, MT_DRIFTDUST)
+					dust.colorized = true
+					dust.color = SKINCOLOR_MOSS
+					dust.momz = 8*mapobjectscale
+					dust.scale = 2*mapobjectscale
 				elseif flags ~= 0x80 then
 					local var = booleans[flags]
 					r[var] = not $
@@ -1215,6 +1332,16 @@ local function RunGhosts()
 					P_RemoveMobj(r.wavedashspin)
 					r.wavedashspin = false
 				end
+
+				if r.ringaward then
+					r.nextringaward = $ + 1
+					local ringrate = 3 - min(2, r.ringaward / 20) // Used to consume fat stacks of cash faster.
+					if r.nextringaward >= ringrate then
+						SpawnRing(r, false)
+						r.nextringaward = 0
+						r.ringaward = $ - 1
+					end
+				end
 			end
 
 			if r.acrotrick then
@@ -1350,34 +1477,50 @@ end)
 if RINGS then
 local ringthinkers = {}
 
-function SpawnRing(r)
-	local ring = SpawnLocal(r.mo.x, r.mo.y, r.mo.z + r.mo.height, MT_THOK)
-	ring.state = S_FASTRING1
+function SpawnRing(r, used)
+	local ring = SpawnLocal(r.mo.x, r.mo.y, r.mo.z + (used and r.mo.height or 0), MT_THOK)
+	ring.state = used and S_FASTRING1 or S_RING
 	ring.target = r.mo
 	ring.extravalue1 = 1
 	ring.frame = $ | FF_TRANS40
-	ringthinkers[ring] = true
+	ringthinkers[ring] = used
+	if not used then
+		ring.angle = r.realangle
+	end
 end
 
 addHook("ThinkFrame", function()
-	for mo in pairs(ringthinkers) do
+	for mo, used in pairs(ringthinkers) do
 		if not mo.valid then
 			ringthinkers[mo] = nil
 			continue
 		end
-		if not mo.target or mo.extravalue1 >= 21 then
+		if not mo.target or mo.extravalue1 >= (used and 21 or 16) then
 			P_RemoveMobj(mo) -- doesn't invalidate, because it's NOTHINK
 			ringthinkers[mo] = nil
 			continue
 		end
 
 		local target = mo.target
-		local hop = FixedMul(80*target.scale, sin(FixedAngle((90 - (9 * abs(10 - mo.extravalue1))) << FRACBITS)))
-		K_MatchGenericExtraFlags(mo, target)
-		P_MoveOrigin(mo, target.x, target.y, target.z + (target.height + hop) * P_MobjFlip(target))
-		local frame = (mo.extravalue1 - 1) * 2 % 24
+		if used then
+			local hop = FixedMul(80*target.scale, sin(FixedAngle((90 - (9 * abs(10 - mo.extravalue1))) << FRACBITS)))
+			K_MatchGenericExtraFlags(mo, target)
+			P_MoveOrigin(mo, target.x, target.y, target.z + (target.height + hop) * P_MobjFlip(target))
+			local frame = (mo.extravalue1 - 1) * 2 % 24
+			mo.frame = ($ & ~FF_FRAMEMASK) | frame
+		else
+			mo.scale = mapobjectscale - (mapobjectscale/14) * mo.extravalue1
+			mo.z = target.z
+			K_MatchGenericExtraFlags(mo, target)
+			local dist = (4*target.scale) * (16 - mo.extravalue1)
+			P_MoveOrigin(mo,
+				target.x + FixedMul(dist, cos(mo.angle)),
+				target.y + FixedMul(dist, sin(mo.angle)),
+				mo.z + target.scale * 24 * P_MobjFlip(mo)
+			)
+			mo.angle = $ + ANG30
+		end
 		mo.extravalue1 = $ + 1
-		mo.frame = ($ & ~FF_FRAMEMASK) | frame
 	end
 end)
 end -- if RINGS
@@ -1413,6 +1556,16 @@ local function FakeSpeedometer(speed, scale)
 		return string.format("%3d %%", (FixedDiv(speed, FixedMul(GetKartSpeed(consoleplayer.kartspeed, scale), 62914))*100)/FRACUNIT)
 	end
 end
+
+local ringbox = {
+	[-1] = "K_SBBG",
+	[-2] = "K_SBBAR",
+	[-3] = "K_SBBAR2",
+	[-4] = "K_SBBAR3",
+	[-5] = "K_SBRING",
+	[-6] = "K_SBSEV",
+	[-7] = "K_SBJACK",
+}
 
 hud.add(function(v, p)
 	if ghostwatching then
@@ -1452,6 +1605,10 @@ hud.add(function(v, p)
 		elseif ghostwatching.hasitem == 2 then
 			trans = V_HUDTRANS
 			v.draw(142, 142, v.cachePatch("K_ISSHOE"), flags|trans)
+		elseif ghostwatching.hasitem < 0 and (ghostwatching.hasitem == -1 or ghostwatching.fakeawardtimer) then
+			trans = V_HUDTRANS
+			v.draw(142, 142, v.cachePatch(ringbox[ghostwatching.hasitem]), flags|trans)
+			ghostwatching.fakeawardtimer = $ - 1
 		end
 	end
 

@@ -36,6 +36,12 @@ local GhostIsRecording = lb_ghost_is_recording
 
 -- lbcomms.lua
 local CommsRequestGhosts = lb_request_ghosts
+
+-- lb_rr.lua
+local RingsLap = lb_rings_lap
+local RingsFinish = lb_rings_finish
+local RingsSpawn = lb_rings_spawn
+
 --------------------------------------------
 
 local RINGS = VERSION == 2
@@ -300,7 +306,7 @@ local function initLeaderboard(player)
 	else
 		disable = disable or not canstart()
 	end
-	disable = $ or not cv_enable.value or not (maptol & RACETOL)
+	disable = $ or not cv_enable.value or not (maptol & RACETOL) or (RINGS and gametype ~= GT_ONLINETA)
 
 	-- Restore encore mode to initial value
 	if disable and EncoreInitial != nil then
@@ -309,6 +315,8 @@ local function initLeaderboard(player)
 	end
 
 	player.afkTime = leveltime
+
+	if RINGS then RingsSpawn(player) end
 
 	if not (player.spectator or disable) then
 		MapRecords = GetMapRecords(gamemap, ST_SEP)
@@ -955,8 +963,18 @@ local function scaleHud(value)
 	return 9*value/10
 end
 
-local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
-	textVFlags = textVFlags or V_HUDTRANSHALF
+local function drawScore(v, player, pos, x, y, gui, score, drawPos)
+	local trans = V_HUDTRANS
+	local halftrans = drawPos and V_HUDTRANS or V_HUDTRANSHALF
+	if RINGS then
+		if player.exiting then
+			trans = 0
+			halftrans = $ == V_HUDTRANSHALF and V_50TRANS or 0
+		else
+			trans = $|V_SLIDEIN
+			halftrans = $|V_SLIDEIN
+		end
+	end
 
 	local hudscale = scaleHud(FRACUNIT)
 	local frdim = scaleHud(FACERANK_DIM)
@@ -965,7 +983,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 
 	-- Position
 	if drawPos then
-		drawNum(v, x, y + 3, pos, textVFlags | VFLAGS)
+		drawNum(v, x, y + 3, pos, halftrans | VFLAGS)
 	end
 
 	--draw Patch/chili
@@ -973,10 +991,10 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 		local faceRank = PATCH[useHighresPortrait() and "FACEWANT" or "FACERANK"][p.skin] or PATCH["NORANK"]
 		local facedownscale = (faceRank ~= PATCH["NORANK"] and useHighresPortrait()) and 2 or 1
 		local color = p.color < MAXSKINCOLORS and p.color or 0
-		v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale/facedownscale, faceRank, V_HUDTRANS | VFLAGS, v.getColormap(TC_DEFAULT, color))
+		v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale/facedownscale, faceRank, trans | VFLAGS, v.getColormap(TC_DEFAULT, color))
 
 		if player.name == p.name then
-			v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale, PATCH["CHILI"][(leveltime / 4) % 8], V_HUDTRANS | VFLAGS)
+			v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale, PATCH["CHILI"][(leveltime / 4) % 8], trans | VFLAGS)
 		end
 
 		-- draw a tiny little dot so you know which player's name is being shown
@@ -1010,8 +1028,8 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 				acc_yoff = 8
 			end
 
-			v.drawString(x + frdim - 2, y + spd_yoff, color..((stat & MSK_SPEED) >> 4), V_HUDTRANS | VFLAGS, "small")
-			v.drawString(x + frdim - 2, y + acc_yoff, color..(stat & MSK_WEIGHT), V_HUDTRANS | VFLAGS, "small")
+			v.drawString(x + frdim - 2, y + spd_yoff, color..((stat & MSK_SPEED) >> 4), trans | VFLAGS, "small")
+			v.drawString(x + frdim - 2, y + acc_yoff, color..(stat & MSK_WEIGHT), trans | VFLAGS, "small")
 		end
 
 		x = x + 17
@@ -1028,7 +1046,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 			bob + (y + frdim/2) << FRACBITS,
 			ruby_scale,
 			PATCH["RUBY"],
-			V_HUDTRANS | VFLAGS
+			trans | VFLAGS
 		)
 	end
 
@@ -1042,7 +1060,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 			y - 2,
 			scale,
 			modePatch(F_SPBATK),
-			V_HUDTRANS | VFLAGS
+			trans | VFLAGS
 		)
 		if score["flags"] & F_SPBEXP then
 			drawitem(
@@ -1051,7 +1069,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 				y - 2,
 				scale,
 				modePatch(F_SPBEXP),
-				V_HUDTRANS | VFLAGS
+				trans | VFLAGS
 			)
 		end
 		if score["flags"] & F_SPBBIG then
@@ -1061,7 +1079,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 				y + frdim - 4,
 				scale,
 				modePatch(F_SPBBIG),
-				V_HUDTRANS | VFLAGS
+				trans | VFLAGS
 			)
 		end
 		if score["flags"] & F_SPBJUS then
@@ -1071,7 +1089,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 				y + frdim - 4,
 				scale,
 				modePatch(F_SPBJUS),
-				V_HUDTRANS | VFLAGS
+				trans | VFLAGS
 			)
 		end
 	end
@@ -1119,7 +1137,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 			x + frdim + px,
 			y + py,
 			name,
-			textVFlags | V_ALLOWLOWERCASE | VFLAGS | flashV,
+			halftrans | V_ALLOWLOWERCASE | VFLAGS | flashV,
 			stralign
 		)
 
@@ -1137,7 +1155,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 				x + px + frdim,
 				y + time_yoff,
 				splitSymbol[clamp(-1, split, 1)] + ticsToTime(abs(split)),
-				textVFlags | splitColor[clamp(-1, split, 1)] | VFLAGS,
+				halftrans | splitColor[clamp(-1, split, 1)] | VFLAGS,
 				cv_smallhud.value and "small" or nil
 			)
 		else
@@ -1145,7 +1163,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos, textVFlags)
 				x + px + frdim,
 				y + time_yoff,
 				ticsToTime(score["time"], true),
-				textVFlags | bodium[min(pos, 4)] | VFLAGS | flashV,
+				halftrans | bodium[min(pos, 4)] | VFLAGS | flashV,
 				cv_smallhud.value and "small" or nil
 			)
 		end
@@ -1207,8 +1225,7 @@ local function drawScroll(v, player, scoreTable, gui)
 				v, player, pos,
 				x, y + ((pos - 1) * frspc),
 				gui, score,
-				true,
-				V_HUDTRANS
+				true
 			)
 		end
 	end
@@ -1397,7 +1414,7 @@ local function saveTime(player)
 	-- Disqualify if the flags changed mid trial.
 	if checkFlags(player) != Flags then
 		print("Game mode change detected! Time has been disqualified.")
-		S_StartSound(nil, 110)
+		S_StartSound(nil, sfx_lose)
 		return
 	end
 
@@ -1416,11 +1433,14 @@ local function saveTime(player)
 		else
 			ghosts = nil
 		end
+		local rs = RINGS and p.hostmod and p.hostmod.restat
+		local speed = rs.speed or p.HMRs or pskin.kartspeed
+		local weight = rs.weight or p.HMRw or pskin.kartweight
 		table.insert(players, player_t(
 			p.name,
 			p.mo.skin,
 			p.skincolor,
-			stat_t(p.HMRs or pskin.kartspeed, p.HMRw or pskin.kartweight)
+			stat_t(speed, weight)
 		))
 	end
 
@@ -1440,7 +1460,7 @@ local function saveTime(player)
 	for i, score in ipairs(ScoreTable) do
 		if isSameRecord(newscore, score, 0) and not lbComp(newscore, score) then
 			-- You suck lol
-			S_StartSound(nil, 201)
+			S_StartSound(nil, sfx_bewar3)
 			FlashTics = leveltime + TICRATE * 3
 			FlashRate = 3
 			FlashVFlags = RedFlash
@@ -1453,7 +1473,7 @@ local function saveTime(player)
 	SaveRecord(newscore, gamemap, ST_SEP, ghosts)
 
 	-- Set players text flash and play chime sfx
-	S_StartSound(nil, 130)
+	S_StartSound(nil, sfx_token)
 	FlashTics = leveltime + TICRATE * 3
 	FlashRate = 1
 	FlashVFlags = YellowFlash
@@ -1480,13 +1500,14 @@ COM_AddCommand("save", saveLeaderboard)
 local function regLap(player)
 	if player.laps > prevLap and TimeFinished == 0 then
 		prevLap = player.laps
-		table.insert(splits, player.realtime)
+		local time = RINGS and RingsLap(player) or player.realtime
+		table.insert(splits, time)
 		showSplit = 5 * TICRATE
 	end
 end
 
 local function changeMap()
-	COM_BufInsertText(server, "map " + nextMap + " -force -gametype race")
+	COM_BufInsertText(server, "map " + nextMap + " -force -gametype "..(RINGS and GT_ONLINETA or "race"))
 	nextMap = nil
 end
 
@@ -1520,7 +1541,7 @@ local function think()
 			hud.enable("minirankings")
 			minirankings = true
 		end
-		if cv_antiafk.value and not G_BattleGametype() then
+		if cv_antiafk.value and gametype == GT_RACE then
 			if not singleplayer() then
 				for p in players.iterate do
 					if p.valid and not p.spectator and not p.exiting and p.lives > 0 then
@@ -1539,7 +1560,7 @@ local function think()
 						end
 						if p.afkTime + AFK_BALANCE_WARN == leveltime then
 							chatprintf(p, "[AFK] \x89You will be moved to spectator in 10 seconds!", false)
-							S_StartSound(nil, 26, p)
+							S_StartSound(nil, sfx_buzz3, p)
 						end
 						if p.afkTime + AFK_BALANCE < leveltime then
 							p.spectator = true
@@ -1626,7 +1647,7 @@ local function think()
 	for _, p in ipairs(gamers) do
 		-- must be done before browser control
 		if p.laps >= mapheaderinfo[gamemap].numlaps + (RINGS and 1 or 0) and TimeFinished == 0 then
-			TimeFinished = p.realtime
+			TimeFinished = RINGS and RingsFinish(p) or p.realtime
 			saveTime(p)
 		end
 
@@ -1674,7 +1695,7 @@ local function think()
 		-- prevent softlocking the server
 		if BrowserPlayer.afkTime + AFK_BROWSER < leveltime then
 			drawState = DS_DEFAULT
-			S_StartSound(nil, 100)
+			S_StartSound(nil, sfx_drown)
 		end
 	elseif gamers[1] and gamers[1].lives == 0 then
 		drawState = DS_SCROLL
@@ -1762,3 +1783,53 @@ local function netvars(net)
 	preroulette = net($)
 end
 addHook("NetVars", netvars)
+
+------------------------------------------------------------
+
+-- have to cram the end screen prototype in here because
+-- no need to dupe splits
+if not RINGS then return end
+
+local function DrawMediumString(v, x, y, str)
+	for i = 1, #str do
+		local char = str:byte(i)
+		local patch = v.cachePatch(string.format("MDFN%03d", char))
+		v.draw(x, y, patch)
+		x = x + patch.width-1
+	end
+end
+
+hud.add(function(v)
+	local ot = consoleplayer.onlineta
+	if not (ot and ot.finished and LB_IsRunning()) then
+		hud.enable("intermissionmessages") -- = intermissiontally
+		return
+	end
+	hud.disable("intermissionmessages") -- = intermissiontally
+
+	S_ShowMusicCredit() -- to hide it, ironically
+
+	--[[
+	v.fadeScreen(135, 10)
+	local dup = v.dupx()
+	local t = (time*dup)/2
+	local t2 = 32*dup
+	local xofs = (v.width() - 320*dup)/2
+	local yofs = (v.height() - 200*dup)/2
+	for y = 0, 7 do
+		for x = 0, 5 do
+			v.drawFill(x*t2*2 - ((t + t2*(y & 1 + t/t2)) % (t2*2)) + xofs, y*t2 - (t % t2) + yofs, t2, t2, 132|V_NOSCALESTART)
+		end
+	end
+	--]]
+
+	local laptimes = {}
+	for i = 1, #splits do
+		laptimes[i] = splits[i] - (splits[i-1] or 0)
+	end
+	table.insert(laptimes, TimeFinished - splits[#splits])
+
+	for i, time in ipairs(laptimes) do
+		DrawMediumString(v, 160, 32 + i*12, string.format("%02d\"%02d", time/TICRATE, G_TicsToCentiseconds(time)))
+	end
+end, "intermission")
