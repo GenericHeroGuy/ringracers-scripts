@@ -53,7 +53,7 @@ local RACETOL = RINGS and TOL_RACE or TOL_RACE | TOL_SP
 local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
 
 -- Holds the current maps records table including all modes
-local MapRecords = {}
+local MapRecords
 
 local TimeFinished = 0
 local disable = false
@@ -605,7 +605,7 @@ COM_AddCommand("lb_encore", function(player)
 	end
 
 	if isserver then
-		CV_Set(enc, (enc.value & 1) ^^ 1) -- Ring Racers uses -1 for "Auto"
+		CV_StealthSet(enc, (enc.value & 1) ^^ 1) -- Ring Racers uses -1 for "Auto"
 	end
 end)
 
@@ -1662,6 +1662,9 @@ local function think()
 		return
 	end
 
+	if not MapRecords then -- mid-game join
+		MapRecords = GetMapRecords(gamemap, ST_SEP)
+	end
 	ScoreTable = MapRecords[ST_SEP & Flags]
 
 	for _, p in ipairs(gamers) do
@@ -1796,7 +1799,6 @@ local function netvars(net)
 	prevLap = net($)
 	drawState = net($)
 	EncoreInitial = net($)
-	MapRecords = net($)
 	TimeFinished = net($)
 	clearcheats = net($)
 	BrowserPlayer = net($)

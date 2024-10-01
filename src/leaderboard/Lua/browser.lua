@@ -92,6 +92,32 @@ local function updateMapIndex(n)
 	updateModes()
 end
 
+-- initialize maps with racemaps only
+local function loadMaps()
+	maps = {}
+	local hell = {}
+	for i = 0, #mapheaderinfo do
+		local map = mapheaderinfo[i]
+		if map and map.typeoflevel & TOL_RACE then
+			if map.menuflags & LF2_HIDEINMENU then
+				table.insert(hell, i)
+			else
+				table.insert(maps, i)
+			end
+		end
+	end
+
+	-- append hell maps
+	for _, map in ipairs(hell) do
+		table.insert(maps, map)
+	end
+end
+addHook("MapLoad", function()
+	maps = nil
+	MapRecords = nil
+	modes = nil
+end)
+
 local scalar = 2
 local hlfScrnWdth = 320 / 2
 local mappY = 26
@@ -479,6 +505,8 @@ end
 rawset(_G, "DrawBrowser", drawBrowser)
 
 local function initBrowser(modeSep)
+	if not maps then loadMaps() end
+
 	ModeSep = modeSep
 
 	-- set mapIndex to current map
@@ -496,28 +524,6 @@ local function initBrowser(modeSep)
 	updateModes()
 end
 rawset(_G, "InitBrowser", initBrowser)
-
--- initialize maps with racemaps only
-local function loadMaps()
-	maps = {}
-	local hell = {}
-	for i = 0, #mapheaderinfo do
-		local map = mapheaderinfo[i]
-		if map and map.typeoflevel & TOL_RACE then
-			if map.menuflags & LF2_HIDEINMENU then
-				table.insert(hell, i)
-			else
-				table.insert(maps, i)
-			end
-		end
-	end
-
-	-- append hell maps
-	for _, map in ipairs(hell) do
-		table.insert(maps, map)
-	end
-end
-addHook("MapLoad", loadMaps)
 
 local repeatCount = 0
 local keyRepeat = 0
@@ -541,6 +547,11 @@ local ValidButtons = BT_ACCELERATE | BT_BRAKE | BT_DRIFT | BT_ATTACK
 
 -- return value indicates we want to exit the browser
 local function controller(player)
+	-- mid-game join
+	if not maps then loadMaps() end
+	if not MapRecords then MapRecords = GetMapRecords(maps[mapIndex], ModeSep) end
+	if not modes then updateModes() end
+
 	keyRepeat = max(0, $ - 1)
 	local throwdir = getThrowDir(player)
 
@@ -588,13 +599,10 @@ end
 rawset(_G, "BrowserController", controller)
 
 local function netvars(net)
-	maps = net($)
 	mapIndex = net($)
-	modes = net($)
 	mode = net($)
 	prefMode = net($)
 	scrollPos = net($)
-	MapRecords = net($)
 	ModeSep = net($)
 end
 addHook("NetVars", netvars)

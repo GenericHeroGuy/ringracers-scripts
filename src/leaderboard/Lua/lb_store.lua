@@ -24,6 +24,8 @@ local GHOST_VERSION = 1
 
 local reloadstore = false
 
+local diffcache, deletecache
+
 local cv_directory = CV_RegisterVar({
 	name = "lb_directory",
 	flags = CV_NETVAR|CV_CALL|CV_NOINIT,
@@ -211,6 +213,10 @@ local function deleteGhost(id)
 end
 rawset(_G, "lb_delete_ghost", deleteGhost)
 
+local function clearcache()
+	diffcache, deletecache = nil, nil
+end
+
 local function writeColdStore(store)
 	local f = StringWriter()
 	f:writestr(StoreName)
@@ -383,6 +389,7 @@ local function SaveRecord(score, map, modeSep, ghosts)
 			deleteGhost(score.id)
 		end
 		dumpStoreToFile()
+		clearcache()
 	end
 end
 rawset(_G, "lb_save_record", SaveRecord)
@@ -525,6 +532,7 @@ local function loadStoreFile(directory)
 	end
 
 	LiveStore = loadMapStore(f)
+	clearcache()
 end
 
 local function squishStore(store)
@@ -614,6 +622,7 @@ local function moveRecords(sourcemap, sourcesum, sourceids, targetmap, targetsum
 
 	if isserver then
 		dumpStoreToFile()
+		clearcache()
 	end
 
 	return moved
@@ -649,6 +658,44 @@ local function applyColdStore(diff)
 	return coldstore
 end
 
+-- makes a diff to send to clients, and saves it
+local function makecache()
+	if diffcache and deletecache or not (isserver and LiveStore) then
+		return
+	end
+
+	local send = {}
+	local highest = 0
+	local byid = {}
+	for map, checksums in pairs(LiveStore) do
+		send[map] = {}
+		for checksum, records in pairs(checksums) do
+			send[map][checksum] = {}
+			for _, record in ipairs(records) do
+				if Dirty[record.id] then
+					table.insert(send[map][checksum], record)
+				end
+				byid[record.id] = record
+				highest = max($, record.id)
+			end
+		end
+	end
+	-- need this in case the very latest records are deleted
+	for i in pairs(Dirty) do
+		highest = max($, i)
+	end
+
+	local deleted = StringWriter()
+	for i = 1, highest do
+		if not byid[i] then
+			deleted:writenum(i)
+		end
+	end
+
+	squishStore(send)
+	diffcache, deletecache = writeColdStore(send), table.concat(deleted)
+end
+
 -- wait until netvars/mapchange so the savegame has a chance to set cv_directory
 -- also in RR, maps are most likely not loaded yet, so we can't get their numbers
 local function loadit()
@@ -659,43 +706,16 @@ local function loadit()
 			loadStoreFile(cv_directory.string)
 		end
 	end
+	-- might as well make a cache now instead of in netvars
+	makecache()
 end
 addHook("MapChange", loadit)
 
 local function netvars(net)
 	if replayplayback then return end
 	if isserver then
-		--print("sending")
-		local send = {}
-		local highest = 0
-		local byid = {}
-		for map, checksums in pairs(LiveStore) do
-			send[map] = {}
-			for checksum, records in pairs(checksums) do
-				send[map][checksum] = {}
-				for _, record in ipairs(records) do
-					if Dirty[record.id] then
-						table.insert(send[map][checksum], record)
-						--print(record.id)
-					end
-					byid[record.id] = record
-					highest = max($, record.id)
-				end
-			end
-		end
-		-- need this in case the very latest records are deleted
-		for i in pairs(Dirty) do
-			highest = max($, i)
-		end
-		local deleted = StringWriter()
-		for i = 1, highest do
-			if not byid[i] then
-				deleted:writenum(i)
-			end
-		end
-		squishStore(send)
-		local dat = writeColdStore(send)
-		net(dat, table.concat(deleted), NextID)
+		makecache()
+		net(diffcache, deletecache, NextID)
 	else
 		loadit()
 		local diff = loadColdStore(StringReader(net("Yes I would like uhhh")))
@@ -751,6 +771,7 @@ COM_AddCommand("lb_write_coldstore", function(player, filename)
 	print("Cold store script written to "..filename.." (rename to "..filename:gsub(".txt", ".lua").."!)")
 	Dirty = {}
 	dumpStoreToFile()
+	clearcache()
 end, COM_LOCAL)
 
 COM_AddCommand("lb_known_maps", function(player, map)
@@ -801,5 +822,6 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 	Dirty = {}
 
 	dumpStoreToFile()
+	clearcache()
 end, COM_LOCAL)
 end -- if not RINGS
