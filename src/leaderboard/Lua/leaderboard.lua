@@ -1745,6 +1745,7 @@ addHook("ThinkFrame", think)
 -- WELCOME BACK NEOROULETTE
 -- combi is strictly sneakers only... from item boxes
 local preroulette
+local cv_debugitem
 if not RINGS then
 addHook("PreThinkFrame", function()
 	if not disable then
@@ -1754,6 +1755,12 @@ addHook("PreThinkFrame", function()
 	end
 end)
 addHook("PlayerThink", function(p)
+    if not cv_debugitem then
+        cv_debugitem = CV_FindVar(RINGS and "debugitem" or "kartdebugitem")
+    end
+
+    if cv_debugitem.value then return end
+
 	if not disable and preroulette[p] and not p.kartstuff[k_itemroulette] and not p.kartstuff[k_eggmanexplode] then
 		p.kartstuff[k_itemtype] = KITEM_SNEAKER
 		p.kartstuff[k_itemamount] = 1
