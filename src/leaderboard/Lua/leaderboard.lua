@@ -209,7 +209,7 @@ local cv_interrupt = CV_RegisterVar({
 	PossibleValue = CV_OnOff,
 	func = function(v)
 		if v.value then
-			COM_BufInsertText(server, "allowteamchange yes")
+			CV_Set(CV_FindVar("allowteamchange"), "Yes")
 		end
 	end
 })
@@ -263,7 +263,10 @@ function allowJoin(v)
 			hud.disable(RINGS and "rankings" or "freeplay")
 		end
 
-		COM_BufInsertText(server, "allowteamchange " + y)
+        -- For some reason, server is invalid player_t sometimes, so can't use COM_BufInsertText in those cases
+        if isserver then
+		    CV_Set(CV_FindVar("allowteamchange"), y)
+        end
 	end
 end
 
