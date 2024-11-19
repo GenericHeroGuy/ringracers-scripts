@@ -64,6 +64,8 @@ local help = true
 local EncoreInitial = nil
 local ScoreTable
 local BrowserPlayer
+-- rings
+local StartTime = 0
 
 
 -- Text flash on finish
@@ -859,6 +861,11 @@ addHook("MapLoad", function()
 	scrollY = 50 * FRACUNIT
 	scrollAcc = 0
 	FlashTics = 0
+	if RINGS then
+		StartTime = 0
+	else
+		StartTime = 6*TICRATE + (3*TICRATE/4)
+	end
 
 	allowJoin(true)
 
@@ -1472,6 +1479,7 @@ local function saveTime(player)
 	local newscore = score_t(
 		Flags | extraflags,
 		TimeFinished,
+		StartTime,
 		splits,
 		players,
 		0
@@ -1673,7 +1681,11 @@ local function think()
 	for _, p in ipairs(gamers) do
 		-- must be done before browser control
 		if p.laps >= mapheaderinfo[gamemap].numlaps + (RINGS and 1 or 0) and TimeFinished == 0 then
-			TimeFinished = RINGS and RingsFinish(p) or p.realtime
+			if RINGS then
+				TimeFinished, StartTime = RingsFinish(p)
+			else
+				TimeFinished = p.realtime
+			end
 			saveTime(p)
 		end
 

@@ -1,9 +1,10 @@
 local RINGS = VERSION == 2
 
-rawset(_G, "lb_score_t", function(flags, time, splits, players, id)
+rawset(_G, "lb_score_t", function(flags, time, starttime, splits, players, id)
 	return {
 		["flags"]  = flags,
 		["time"]   = time,
+		["starttime"] = starttime,
 		["splits"] = splits,
 		["players"] = players,
 		["id"]     = id,

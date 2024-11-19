@@ -57,7 +57,7 @@ addHook("MobjSpawn", function()
 end)
 
 addHook("MobjThinker", function(mo)
-	if LB_IsRunning() and cv_ringboxes.value then
+	if gametype == GT_ONLINETA and cv_ringboxes.value then
 		mo.extravalue1 = 0
 	end
 end, MT_RANDOMITEM)
@@ -69,7 +69,8 @@ end)
 
 rawset(_G, "lb_rings_spawn", function(p)
 	-- LB_IsRunning isn't valid yet in MobjSpawn so I have to set this here, bleh
-	if not fuseset and LB_IsRunning() and cv_ringboxes.value then
+	-- ...actually, just check for our gametype so this works in replays
+	if not fuseset and gametype == GT_ONLINETA and cv_ringboxes.value then
 		fuseset = true
 		for mo in mobjs.iterate() do
 			if mo.type == MT_RANDOMITEM then
@@ -83,7 +84,7 @@ rawset(_G, "lb_rings_spawn", function(p)
 		end
 	end
 
-	if LB_IsRunning() and not p.spectator then
+	if gametype == GT_ONLINETA and not p.spectator then
 		p.rings = 20
 		if faultstart ~= true then
 			local fx, fy, fz = faultstart.x<<FRACBITS, faultstart.y<<FRACBITS, faultstart.z<<FRACBITS
@@ -102,6 +103,7 @@ rawset(_G, "lb_rings_spawn", function(p)
 			exittimer = 0,
 			finished = false,
 			started = false,
+			starttime = 0,
 		}
 	else
 		p.onlineta = nil
@@ -120,7 +122,7 @@ rawset(_G, "lb_rings_finish", function(p)
 	S_StartSound(nil, sfx_s3k6a)
 	ot.exittimer = 5*TICRATE/2
 	ot.finished = true
-	return ot.curtime
+	return ot.curtime, ot.starttime
 end)
 
 addHook("PlayerThink", function(p)
@@ -203,8 +205,9 @@ addHook("ThinkFrame", function(p)
 		local ot = p.onlineta
 		if not ot then return end
 
-		if p.pflags & PF_HITFINISHLINE then
+		if p.pflags & PF_HITFINISHLINE and not ot.started then
 			ot.started = true
+			ot.starttime = leveltime
 		end
 		if ot.started and not ot.finished then
 			ot.curtime = $ + 1

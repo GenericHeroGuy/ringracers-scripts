@@ -19,8 +19,10 @@ local ghost_t = lb_ghost_t
 local RINGS = VERSION == 2
 local open = RINGS and function(path, mode) return io.openlocal("client/"..path, mode) end or io.open
 
-local LEADERBOARD_VERSION = 1
+local LEADERBOARD_VERSION = 2
 local GHOST_VERSION = 1
+
+local OLD_STARTTIME = 6*TICRATE + (3*TICRATE/4) -- starttime for version 1 records
 
 local reloadstore = false
 
@@ -125,6 +127,7 @@ local function writeRecord(f, record)
 	f:writenum(record.id)
 	f:writenum(record.flags)
 	f:writenum(record.time)
+	f:writenum(record.starttime)
 	f:write8(#record.splits)
 	for _, v in ipairs(record.splits) do
 		f:writenum(v)
@@ -430,6 +433,7 @@ local function oldParseScore(str)
 	return score_t(
 		flags,
 		tonumber(t[5]),	-- Time
+		OLD_STARTTIME,
 		splits,
 		{
 			player_t(
@@ -443,10 +447,14 @@ local function oldParseScore(str)
 end
 rawset(_G, "lb_parse_score", oldParseScore)
 
-local function parseScoreBinary(f)
+local function parseScoreBinary(f, version)
 	local id = f:readnum()
 	local flags = f:readnum()
 	local time = f:readnum()
+	local starttime = OLD_STARTTIME
+	if version >= 2 then
+		starttime = f:readnum()
+	end
 
 	local splits = {}
 	local numsplits = f:read8()
@@ -467,13 +475,14 @@ local function parseScoreBinary(f)
 	return score_t(
 		flags,
 		time,
+		starttime,
 		splits,
 		players,
 		id
 	)
 end
 
-local function loadMapStore(f)
+local function loadMapStore(f, version)
 	local store = {}
 	for _ = 1, f:readnum() do
 		local mapnum = mapnumFromExtended(f:readstr())
@@ -486,7 +495,7 @@ local function loadMapStore(f)
 			local scores = {}
 			checksums[checksum] = scores
 			for j = 1, numrecords do
-				table.insert(scores, parseScoreBinary(f))
+				table.insert(scores, parseScoreBinary(f, version))
 			end
 		end
 	end
@@ -495,7 +504,7 @@ end
 
 local function loadColdStore(f)
 	local directory = f:readstr()
-	local store = loadMapStore(f)
+	local store = loadMapStore(f, LEADERBOARD_VERSION)
 
 	return store, directory
 end
@@ -531,7 +540,7 @@ local function loadStoreFile(directory)
 		Dirty[f:readnum()] = true
 	end
 
-	LiveStore = loadMapStore(f)
+	LiveStore = loadMapStore(f, version)
 	clearcache()
 end
 

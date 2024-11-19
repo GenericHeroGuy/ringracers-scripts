@@ -15,7 +15,9 @@ local DeleteGhost = lb_delete_ghost
 -----------------------------
 
 local RINGS = VERSION == 2
+local BT_CUSTOM1 = RINGS and 1<<13 or BT_CUSTOM1
 local BT_CUSTOM2 = RINGS and 1<<14 or BT_CUSTOM2
+local BT_CUSTOM3 = RINGS and 1<<15 or BT_CUSTOM3
 local TURNING = RINGS and "turning" or "driftturn"
 local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
 local FIRSTRAINBOWCOLOR = SKINCOLOR_PINK
@@ -735,7 +737,10 @@ addHook("ThinkFrame", function()
 		-- i have no clue what to do about the whiplash from teleports
 
 		local mold = g.momlog
-		local angle = (RINGS and player.respawn.state == 1) and player.drawangle or player.mo.angle
+		local angle = player.mo.angle
+		if RINGS and player.respawn.state == 1 then
+			angle = player.drawangle
+		end
 		local mnew = { x = player.mo.x - g.fakex, y = player.mo.y - g.fakey, z = player.mo.z - g.fakez, a = angle - g.fakea }
 		g.momlog = mnew
 
@@ -813,6 +818,10 @@ local function StartPlaying(record)
 			file = StringReader(ghosts[i].data),
 			name = recplayer.name,
 			startofs = ghosts[i].startofs,
+			starttime = record.starttime,
+			curtic = 0, -- ghost's leveltime
+			paused = false,
+			fastforward = false,
 			mo = mo,
 			gmomx = 0,
 			gmomy = 0,
@@ -900,7 +909,7 @@ local function NextWatch()
 	repeat
 		if (ghost and not start) or not replayers[ghost] then start = next(replayers) end -- no infinite loops please
 		ghost = next(replayers, ghost) or next(replayers) -- loop de loop
-		if ghost and leveltime >= ghost.startofs then
+		if ghost and ghost.curtic >= ghost.startofs then
 			ghostwatching = ghost
 			return
 		end
@@ -922,9 +931,6 @@ addHook("MapChange", function()
 	replayers = {}
 	ghostwatching = nil
 end)
-
-local starttime = 6*TICRATE + (3*TICRATE/4)
-local ghostcustom2 = 0
 
 local function SpawnDriftSparks(r, direction)
 	if leveltime % 2 == 1 then
@@ -1117,267 +1123,292 @@ local booleans = {
 	[GS_GRAVFLIP] = "gravityflip",
 }
 
+local function PlayGhostTic(r)
+	if r.curtic < r.startofs then
+		r.curtic = $ + 1
+		return
+	elseif r.curtic == r.startofs then
+		r.mo.flags = $ & ~MF_NOSECTOR
+	end
+
+	local flags
+	while true do -- for all the specials
+		flags = r.file:read8()
+		if not (flags & 0x80) then break end
+		if flags & GSB_FASTLINES then
+			r.fastlines = not $
+			flags = $ & ~GSB_FASTLINES
+		end
+		if flags >= GS_SPARKS0 and flags <= GS_SPARKS4 then
+			r.driftspark = flags - GS_NOSPARKS
+		elseif flags == GS_DRIFTBOOST then
+			r.drifthilite = 0
+			r.drifthilitecolor = r.driftspark
+			r.driftspark = 0
+		elseif flags == GS_BOOSTFLAME or flags == GS_USESNEAKER then
+			if not (r.boostflame and r.boostflame.valid) then
+				r.boostflame = P_SpawnMobj(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
+				r.boostflame.scale = r.mo.scale
+			end
+			r.boostflame.state = S_BOOSTFLAME
+			r.boostflame.frame = $ | FF_TRANS40
+			if flags == GS_USESNEAKER then
+				r.hasitem = 0
+			end
+		elseif flags == GS_USERING then
+			SpawnRing(r, true)
+		elseif flags >= GS_NOITEM and flags <= GS_GETITEM then
+			r.hasitem = flags - GS_NOITEM
+		elseif flags >= GS_RINGBOX and flags <= GS_GETJACKPOT then
+			r.hasitem = GS_RINGBOX - flags - 1 -- we're going negative folks!
+			r.fakeawardtimer = TICRATE
+		elseif flags == GS_SUPERRING then
+			r.ringaward = r.file:read8()
+		elseif flags == GS_FAILSAFEBOOST then
+			local dust = P_SpawnMobj(r.mo.x, r.mo.y, r.mo.z, MT_DRIFTDUST)
+			dust.colorized = true
+			dust.color = SKINCOLOR_MOSS
+			dust.momz = 8*mapobjectscale
+			dust.scale = 2*mapobjectscale
+		elseif flags ~= 0x80 then
+			local var = booleans[flags]
+			r[var] = not $
+		end
+	end
+
+	local dx = (flags & 0x10) and BloatToFixed(r.file:read8())
+	local dy = (flags & 0x10) and BloatToFixed(r.file:read8())
+	local dz = (flags & 0x20) and BloatToFixed(r.file:read8())
+	local da = (flags & 0x40) and BloatToFixed(r.file:read8())
+	local frame, fspecial = ReadFakeFrame(flags & 0x0f, r.mo.skin)
+	if r.dead then frame, fspecial = SPR2_DEAD, "" end
+	if RINGS and frame == SPR2_STIL and not P_IsValidSprite2(r.mo, frame) then
+		frame = spr2defaults[frame]
+	end
+
+	r.fakeframe = flags & 0x0f
+	r.fspecial = fspecial
+	r.gmomx = $ + dx
+	r.gmomy = $ + dy
+	r.gmomz = $ + dz
+	r.gmoma = $ + da
+
+	P_MoveOrigin(r.mo, r.mo.x + r.gmomx, r.mo.y + r.gmomy, r.mo.z + r.gmomz)
+	if RINGS then
+		ghoststate.frame = frame | FF_TRANS40
+		r.mo.state = S_LBGHOST
+	else
+		r.mo.frame = frame | FF_TRANS40
+	end
+	r.realangle = $ + r.gmoma
+	r.mo.angle = r.realangle
+	if fspecial == "spin" then
+		r.mo.angle = $ + (ANGLE_22h*(leveltime%16))
+	end
+
+	if r.boostflame and r.boostflame.valid then
+		P_MoveOrigin(r.boostflame, r.mo.x + P_ReturnThrustX(r.realangle+ANGLE_180, r.mo.radius), r.mo.y + P_ReturnThrustY(r.realangle+ANGLE_180, r.mo.radius), r.mo.z)
+		r.boostflame.angle = r.realangle
+		r.boostflame.scale = r.mo.scale
+
+		if r.boostflame.state == S_BOOSTSMOKESPAWNER then
+			local smoke = P_SpawnMobj(r.boostflame.x, r.boostflame.y, r.boostflame.z+(8<<FRACBITS), MT_BOOSTSMOKE)
+
+			smoke.scale = r.mo.scale/2
+			smoke.destscale = 3*r.mo.scale/2
+			smoke.scalespeed = r.mo.scale/12
+
+			smoke.momx = r.gmomx/2
+			smoke.momy = r.gmomy/2
+			smoke.momz = r.gmomz/2
+
+			P_Thrust(smoke, r.boostflame.angle+FixedAngle(randomrange(135, 225)<<FRACBITS), randomrange(0, 8) * r.mo.scale)
+		end
+	end
+	local dir = 0
+	if fspecial == "driftl" then
+		dir = 1
+	elseif fspecial == "driftr" then
+		dir = -1
+	end
+	r.driftdir = dir or $ -- for sliptide
+	if r.driftspark then
+		SpawnDriftSparks(r, r.driftdir)
+	end
+	if r.fastlines then
+		SpawnFastLines(r)
+	end
+	if r.sliptiding then
+		SpawnAIZDust(r, r.driftdir)
+	end
+	if r.respawning then
+		SpawnDEZLasers(r)
+	end
+
+	if RINGS then
+		if dir then -- drawangle offset for drifting
+			r.mo.angle = $ + ANGLE_45*dir
+		end
+
+		if r.tricking then
+			-- i might have to rethink frame specials
+			r.mo.angle = $ + (ANGLE_22h*(leveltime%16))
+		end
+
+		if r.trickcharged then
+			local aura = r.trickaura
+			if not aura then
+				aura = SpawnLocal(r.mo.x, r.mo.y, r.mo.z + r.mo.height/2, MT_THOK)
+				aura.state = S_CHARGEAURA
+				aura.renderflags = RF_PAPERSPRITE|RF_FULLBRIGHT|RF_ADD
+				r.trickaura = aura
+			end
+			P_MoveOrigin(aura, r.mo.x, r.mo.y, r.mo.z + r.mo.height/2)
+			aura.frame = (leveltime/2)%5
+			aura.angle = leveltime*ANG10
+		elseif r.trickaura then
+			P_RemoveMobj(r.trickaura)
+			r.trickaura = false
+		end
+
+		if r.spindashing then
+			SpawnSpindashDust(r)
+			r.mo.spritexoffset = (leveltime & 1 or -1)*FRACUNIT
+			r.mo.spriteyoffset = 3*(leveltime % 3 - 1)*FRACUNIT/2
+		else
+			r.mo.spritexoffset = 0
+			r.mo.spriteyoffset = 0
+		end
+
+		if r.sliptiding then
+			if abs(r.sliptilt) < ANGLE_22h then
+				r.sliptilt = (abs($) + ANGLE_11hh/4)*r.driftdir
+			end
+		else
+			r.sliptilt = $ - $/4
+			if abs(r.sliptilt) < ANGLE_11hh / 4 then
+				r.sliptilt = 0
+			end
+		end
+		local angle = R_PointToAngle(r.mo.x, r.mo.y) - r.mo.angle
+		r.mo.rollangle = FixedMul(r.sliptilt, sin(abs(angle))) + FixedMul(r.sliptilt, cos(angle))
+		--r.mo.angle = $ + r.sliptilt*4
+
+		if r.fastfalling then
+			if not r.fastfallwave then
+				r.fastfallwave = SpawnLocal(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
+				r.fastfallwave.state = S_SOFTLANDING1
+				r.fastfallwave.flags = $ & ~MF_NOCLIPHEIGHT
+				r.fastfallwave.renderflags = RF_NOSPLATBILLBOARD|RF_OBJECTSLOPESPLAT
+			end
+			local wave = r.fastfallwave
+			wave.frame = ($ & ~FF_FRAMEMASK) | (leveltime/4)%5
+
+			if leveltime % 2 then
+				wave.renderflags = $ | RF_DONTDRAW
+			else
+				wave.renderflags = $ & ~RF_DONTDRAW
+			end
+
+			// Cast like a shadow on the ground
+			P_MoveOrigin(wave, r.mo.x, r.mo.y, r.mo.floorz)
+			--wave.standingslope = r.mo.standingslope
+			P_TryMove(wave, wave.x, wave.y)
+
+			if r.gmomz < -24 * mapobjectscale then
+				// Going down, falling through hoops
+				local ghost = P_SpawnGhostMobj(wave)
+				-- bruh
+				P_SetOrigin(ghost, wave.x, wave.y, wave.z+1)
+
+				ghost.z = r.mo.z
+				ghost.momz = -r.gmomz
+				--ghost.standingslope = nil
+				P_TryMove(ghost, ghost.x, ghost.y)
+
+				ghost.renderflags = wave.renderflags
+				ghost.fuse = 16
+				ghost.extravalue1 = 1
+				ghost.extravalue2 = 0
+			end
+		elseif r.fastfallwave then
+			P_RemoveMobj(r.fastfallwave)
+			r.fastfallwave = false
+		end
+
+		if r.wavedashing then
+			if not r.wavedashspin then
+				r.wavedashspin = SpawnLocal(r.mo.x, r.mo.y, r.mo.z, MT_WAVEDASH)
+				r.wavedashspin.frame = FF_PAPERSPRITE|FF_TRANS40|H -- H
+			end
+			local mo = r.wavedashspin
+			local angle = R_PointToAngle2(0, 0, r.gmomx, r.gmomy)
+			P_MoveOrigin(mo, r.mo.x - FixedMul(40*mapobjectscale, cos(angle)),
+			                 r.mo.y - FixedMul(40*mapobjectscale, sin(angle)),
+			                 r.mo.z + r.mo.height/2)
+			mo.angle = angle + ANGLE_90
+			mo.scale = 3*r.mo.scale/2
+			mo.rollangle = $ + ANGLE_22h
+		elseif r.wavedashspin then
+			P_RemoveMobj(r.wavedashspin)
+			r.wavedashspin = false
+		end
+
+		if r.ringaward then
+			r.nextringaward = $ + 1
+			local ringrate = 3 - min(2, r.ringaward / 20) // Used to consume fat stacks of cash faster.
+			if r.nextringaward >= ringrate then
+				SpawnRing(r, false)
+				r.nextringaward = 0
+				r.ringaward = $ - 1
+			end
+		end
+	end
+
+	if r.acrotrick then
+		-- i REALLY need to rethink frame specials
+		r.mo.angle = $ + (ANG30*(leveltime%12))
+	end
+
+	if r.gravityflip then
+		r.mo.eflags = $ | MFE_VERTICALFLIP
+	else
+		r.mo.eflags = $ & ~MFE_VERTICALFLIP
+	end
+
+	r.curtic = $ + 1
+end
+
 local errorghost
 local function RunGhosts()
 	errorghost = nil
 	for r in pairs(replayers) do
 		errorghost = r
-		if leveltime < r.startofs then
-			continue
-		elseif leveltime == r.startofs then
-			r.mo.flags = $ & ~MF_NOSECTOR
+		if RINGS then
+			if r.curtic == r.starttime then
+				r.paused = true
+			end
+			if consoleplayer.onlineta.started and r.curtic <= r.starttime then
+				r.paused = false
+				while r.curtic < r.starttime do
+					if r.file:empty() then
+						error("Ghost ends before starttime")
+					end
+					PlayGhostTic(r)
+				end
+			end
 		end
-		if not r.file:empty() then
-			local flags
-			while true do -- for all the specials
-				flags = r.file:read8()
-				if not (flags & 0x80) then break end
-				if flags & GSB_FASTLINES then
-					r.fastlines = not $
-					flags = $ & ~GSB_FASTLINES
-				end
-				if flags >= GS_SPARKS0 and flags <= GS_SPARKS4 then
-					r.driftspark = flags - GS_NOSPARKS
-				elseif flags == GS_DRIFTBOOST then
-					r.drifthilite = 0
-					r.drifthilitecolor = r.driftspark
-					r.driftspark = 0
-				elseif flags == GS_BOOSTFLAME or flags == GS_USESNEAKER then
-					if not (r.boostflame and r.boostflame.valid) then
-						r.boostflame = P_SpawnMobj(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
-						r.boostflame.scale = r.mo.scale
+		if not r.paused then
+			for i = 1, r.fastforward and 3 or 1 do
+				if r.file:empty() then
+					StopPlaying(r)
+					if not ghostwatching then
+						consoleplayer.awayviewtics = 0
+						consoleplayer.awayviewmobj = nil
 					end
-					r.boostflame.state = S_BOOSTFLAME
-					r.boostflame.frame = $ | FF_TRANS40
-					if flags == GS_USESNEAKER then
-						r.hasitem = 0
-					end
-				elseif flags == GS_USERING then
-					SpawnRing(r, true)
-				elseif flags >= GS_NOITEM and flags <= GS_GETITEM then
-					r.hasitem = flags - GS_NOITEM
-				elseif flags >= GS_RINGBOX and flags <= GS_GETJACKPOT then
-					r.hasitem = GS_RINGBOX - flags - 1 -- we're going negative folks!
-					r.fakeawardtimer = TICRATE
-				elseif flags == GS_SUPERRING then
-					r.ringaward = r.file:read8()
-				elseif flags == GS_FAILSAFEBOOST then
-					local dust = P_SpawnMobj(r.mo.x, r.mo.y, r.mo.z, MT_DRIFTDUST)
-					dust.colorized = true
-					dust.color = SKINCOLOR_MOSS
-					dust.momz = 8*mapobjectscale
-					dust.scale = 2*mapobjectscale
-				elseif flags ~= 0x80 then
-					local var = booleans[flags]
-					r[var] = not $
+					break
 				end
-			end
-
-			local dx = (flags & 0x10) and BloatToFixed(r.file:read8())
-			local dy = (flags & 0x10) and BloatToFixed(r.file:read8())
-			local dz = (flags & 0x20) and BloatToFixed(r.file:read8())
-			local da = (flags & 0x40) and BloatToFixed(r.file:read8())
-			local frame, fspecial = ReadFakeFrame(flags & 0x0f, r.mo.skin)
-			if r.dead then frame, fspecial = SPR2_DEAD, "" end
-			if RINGS and frame == SPR2_STIL and not P_IsValidSprite2(r.mo, frame) then
-				frame = spr2defaults[frame]
-			end
-
-			r.fakeframe = flags & 0x0f
-			r.fspecial = fspecial
-			r.gmomx = $ + dx
-			r.gmomy = $ + dy
-			r.gmomz = $ + dz
-			r.gmoma = $ + da
-
-			P_MoveOrigin(r.mo, r.mo.x + r.gmomx, r.mo.y + r.gmomy, r.mo.z + r.gmomz)
-			if RINGS then
-				ghoststate.frame = frame | FF_TRANS40
-				r.mo.state = S_LBGHOST
-			else
-				r.mo.frame = frame | FF_TRANS40
-			end
-			r.realangle = $ + r.gmoma
-			r.mo.angle = r.realangle
-			if fspecial == "spin" then
-				r.mo.angle = $ + (ANGLE_22h*(leveltime%16))
-			end
-
-			if r.boostflame and r.boostflame.valid then
-				P_MoveOrigin(r.boostflame, r.mo.x + P_ReturnThrustX(r.realangle+ANGLE_180, r.mo.radius), r.mo.y + P_ReturnThrustY(r.realangle+ANGLE_180, r.mo.radius), r.mo.z)
-				r.boostflame.angle = r.realangle
-				r.boostflame.scale = r.mo.scale
-
-				if r.boostflame.state == S_BOOSTSMOKESPAWNER then
-					local smoke = P_SpawnMobj(r.boostflame.x, r.boostflame.y, r.boostflame.z+(8<<FRACBITS), MT_BOOSTSMOKE)
-
-					smoke.scale = r.mo.scale/2
-					smoke.destscale = 3*r.mo.scale/2
-					smoke.scalespeed = r.mo.scale/12
-
-					smoke.momx = r.gmomx/2
-					smoke.momy = r.gmomy/2
-					smoke.momz = r.gmomz/2
-
-					P_Thrust(smoke, r.boostflame.angle+FixedAngle(randomrange(135, 225)<<FRACBITS), randomrange(0, 8) * r.mo.scale)
-				end
-			end
-			local dir = 0
-			if fspecial == "driftl" then
-				dir = 1
-			elseif fspecial == "driftr" then
-				dir = -1
-			end
-			r.driftdir = dir or $ -- for sliptide
-			if r.driftspark then
-				SpawnDriftSparks(r, r.driftdir)
-			end
-			if r.fastlines then
-				SpawnFastLines(r)
-			end
-			if r.sliptiding then
-				SpawnAIZDust(r, r.driftdir)
-			end
-			if r.respawning then
-				SpawnDEZLasers(r)
-			end
-
-			if RINGS then
-				if dir then -- drawangle offset for drifting
-					r.mo.angle = $ + ANGLE_45*dir
-				end
-
-				if r.tricking then
-					-- i might have to rethink frame specials
-					r.mo.angle = $ + (ANGLE_22h*(leveltime%16))
-				end
-
-				if r.trickcharged then
-					local aura = r.trickaura
-					if not aura then
-						aura = SpawnLocal(r.mo.x, r.mo.y, r.mo.z + r.mo.height/2, MT_THOK)
-						aura.state = S_CHARGEAURA
-						aura.renderflags = RF_PAPERSPRITE|RF_FULLBRIGHT|RF_ADD
-						r.trickaura = aura
-					end
-					P_MoveOrigin(aura, r.mo.x, r.mo.y, r.mo.z + r.mo.height/2)
-					aura.frame = (leveltime/2)%5
-					aura.angle = leveltime*ANG10
-				elseif r.trickaura then
-					P_RemoveMobj(r.trickaura)
-					r.trickaura = false
-				end
-
-				if r.spindashing then
-					SpawnSpindashDust(r)
-					r.mo.spritexoffset = (leveltime & 1 or -1)*FRACUNIT
-					r.mo.spriteyoffset = 3*(leveltime % 3 - 1)*FRACUNIT/2
-				else
-					r.mo.spritexoffset = 0
-					r.mo.spriteyoffset = 0
-				end
-
-				if r.sliptiding then
-					if abs(r.sliptilt) < ANGLE_22h then
-						r.sliptilt = (abs($) + ANGLE_11hh/4)*r.driftdir
-					end
-				else
-					r.sliptilt = $ - $/4
-					if abs(r.sliptilt) < ANGLE_11hh / 4 then
-						r.sliptilt = 0
-					end
-				end
-				local angle = R_PointToAngle(r.mo.x, r.mo.y) - r.mo.angle
-				r.mo.rollangle = FixedMul(r.sliptilt, sin(abs(angle))) + FixedMul(r.sliptilt, cos(angle))
-				--r.mo.angle = $ + r.sliptilt*4
-
-				if r.fastfalling then
-					if not r.fastfallwave then
-						r.fastfallwave = SpawnLocal(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
-						r.fastfallwave.state = S_SOFTLANDING1
-						r.fastfallwave.flags = $ & ~MF_NOCLIPHEIGHT
-						r.fastfallwave.renderflags = RF_NOSPLATBILLBOARD|RF_OBJECTSLOPESPLAT
-					end
-					local wave = r.fastfallwave
-					wave.frame = ($ & ~FF_FRAMEMASK) | (leveltime/4)%5
-
-					if leveltime % 2 then
-						wave.renderflags = $ | RF_DONTDRAW
-					else
-						wave.renderflags = $ & ~RF_DONTDRAW
-					end
-
-					// Cast like a shadow on the ground
-					P_MoveOrigin(wave, r.mo.x, r.mo.y, r.mo.floorz)
-					--wave.standingslope = r.mo.standingslope
-					P_TryMove(wave, wave.x, wave.y)
-
-					if r.gmomz < -24 * mapobjectscale then
-						// Going down, falling through hoops
-						local ghost = P_SpawnGhostMobj(wave)
-						-- bruh
-						P_SetOrigin(ghost, wave.x, wave.y, wave.z+1)
-
-						ghost.z = r.mo.z
-						ghost.momz = -r.gmomz
-						--ghost.standingslope = nil
-						P_TryMove(ghost, ghost.x, ghost.y)
-
-						ghost.renderflags = wave.renderflags
-						ghost.fuse = 16
-						ghost.extravalue1 = 1
-						ghost.extravalue2 = 0
-					end
-				elseif r.fastfallwave then
-					P_RemoveMobj(r.fastfallwave)
-					r.fastfallwave = false
-				end
-
-				if r.wavedashing then
-					if not r.wavedashspin then
-						r.wavedashspin = SpawnLocal(r.mo.x, r.mo.y, r.mo.z, MT_WAVEDASH)
-						r.wavedashspin.frame = FF_PAPERSPRITE|FF_TRANS40|H -- H
-					end
-					local mo = r.wavedashspin
-					local angle = R_PointToAngle2(0, 0, r.gmomx, r.gmomy)
-					P_MoveOrigin(mo, r.mo.x - FixedMul(40*mapobjectscale, cos(angle)),
-					                 r.mo.y - FixedMul(40*mapobjectscale, sin(angle)),
-					                 r.mo.z + r.mo.height/2)
-					mo.angle = angle + ANGLE_90
-					mo.scale = 3*r.mo.scale/2
-					mo.rollangle = $ + ANGLE_22h
-				elseif r.wavedashspin then
-					P_RemoveMobj(r.wavedashspin)
-					r.wavedashspin = false
-				end
-
-				if r.ringaward then
-					r.nextringaward = $ + 1
-					local ringrate = 3 - min(2, r.ringaward / 20) // Used to consume fat stacks of cash faster.
-					if r.nextringaward >= ringrate then
-						SpawnRing(r, false)
-						r.nextringaward = 0
-						r.ringaward = $ - 1
-					end
-				end
-			end
-
-			if r.acrotrick then
-				-- i REALLY need to rethink frame specials
-				r.mo.angle = $ + (ANG30*(leveltime%12))
-			end
-
-			if r.gravityflip then
-				r.mo.eflags = $ | MFE_VERTICALFLIP
-			else
-				r.mo.eflags = $ & ~MFE_VERTICALFLIP
-			end
-		else
-			--print("Finished")
-			StopPlaying(r)
-			if not ghostwatching then
-				consoleplayer.awayviewtics = 0
-				consoleplayer.awayviewmobj = nil
+				PlayGhostTic(r)
 			end
 		end
 	end
@@ -1391,6 +1422,10 @@ local function RunGhosts()
 	end
 	errorghost = nil -- no more error handling
 end
+
+local ghostcustom1 = 0
+local ghostcustom2 = 0
+local ghostcustom3 = 0
 
 addHook("ThinkFrame", function()
 	if defrosting then return end
@@ -1407,10 +1442,24 @@ addHook("ThinkFrame", function()
 	end
 	--]]
 
+	if consoleplayer.cmd.buttons & BT_CUSTOM1 then
+		ghostcustom1 = $ + 1
+	else
+		ghostcustom1 = 0
+	end
 	if consoleplayer.cmd.buttons & BT_CUSTOM2 then
 		ghostcustom2 = $ + 1
 	else
 		ghostcustom2 = 0
+	end
+	if consoleplayer.cmd.buttons & BT_CUSTOM3 then
+		ghostcustom3 = $ + 1
+	else
+		ghostcustom3 = 0
+	end
+
+	if ghostcustom1 == 1 then
+		ghostwatching.fastforward = not $
 	end
 
 	if ghostcustom2 == 1 then
@@ -1419,6 +1468,10 @@ addHook("ThinkFrame", function()
 			ghostcam.flags = MF_NOTHINK|MF_NOSECTOR|MF_NOBLOCKMAP|MF_NOCLIP|MF_NOCLIPHEIGHT|MF_NOCLIPTHING
 		end
 		NextWatch()
+	end
+
+	if ghostcustom3 == 1 then
+		ghostwatching.paused = not $
 	end
 
 	local ok, err = pcall(RunGhosts)
@@ -1657,6 +1710,7 @@ hud.add(function(v, p)
 		v.drawString(240, 80, "GY: "..(r.mo.y/FRACUNIT))
 		v.drawString(240, 88, "GZ: "..(r.mo.z/FRACUNIT))
 		v.drawString(240, 96, "GA: "..(r.mo.angle/ANG1))
+		v.drawString(240, 104, "PA: "..tostring(r.paused))
 		local patch = v.cachePatch("BLANKLVL")
 		v.drawOnMinimap(r.mo.x, r.mo.y, FixedDiv(10, patch.height), patch)
 	end
