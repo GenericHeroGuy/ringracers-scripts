@@ -136,6 +136,7 @@ local function writeRecord(f, record)
 	for _, p in ipairs(record.players) do
 		f:writestr(p.name)
 		f:writestr(p.skin)
+		f:writestr(p.appear)
 		f:write8(p.color)
 		f:write8(p.stat)
 	end
@@ -439,6 +440,7 @@ local function oldParseScore(str)
 			player_t(
 				t[2], -- Name
 				t[3], -- Skin
+				"",
 				tonumber(t[4]), -- Color
 				stats
 			)
@@ -467,9 +469,13 @@ local function parseScoreBinary(f, version)
 	for i = 1, numplayers do
 		local name = f:readstr()
 		local skin = f:readstr()
+		local appear = ""
+		if version >= 2 then
+			appear = f:readstr()
+		end
 		local color = f:read8()
 		local stats = f:read8()
-		table.insert(players, player_t(name, skin, color, stat_t(stats >> 4, stats & 0xf)))
+		table.insert(players, player_t(name, skin, appear, color, stat_t(stats >> 4, stats & 0xf)))
 	end
 
 	return score_t(

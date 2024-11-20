@@ -16,6 +16,7 @@ local drawNum = lb_draw_num
 local getThrowDir = lb_throw_dir
 local ghost_t = lb_ghost_t
 local mapNameAndSum = lb_mapname_and_checksum
+local getPortrait = lb_get_portrait
 
 -- browser.lua
 local InitBrowser = InitBrowser
@@ -133,8 +134,6 @@ local scrollAcc = 0
 -- patch caching
 local cachePatches
 
-local useHighresPortrait
-
 -- clamp(min, v, max)
 local clamp
 
@@ -158,13 +157,6 @@ local cv_gui = CV_RegisterVar({
 
 local cv_smallhud = CV_RegisterVar({
 	name = "lb_smallhud",
-	defaultvalue = "Off",
-	flags = 0,
-	PossibleValue = CV_OnOff,
-})
-
-local cv_lb_highresportrait = CV_RegisterVar({
-	name = "lb_highresportrait",
 	defaultvalue = "Off",
 	flags = 0,
 	PossibleValue = CV_OnOff,
@@ -1016,10 +1008,9 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos)
 
 	--draw Patch/chili
 	for i, p in ipairs(score.players) do
-		local faceRank = PATCH[useHighresPortrait() and "FACEWANT" or "FACERANK"][p.skin] or PATCH["NORANK"]
-		local facedownscale = (faceRank ~= PATCH["NORANK"] and useHighresPortrait()) and 2 or 1
+		local faceRank, scale = getPortrait(v, p)
 		local color = p.color < MAXSKINCOLORS and p.color or 0
-		v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale/facedownscale, faceRank, trans | VFLAGS, v.getColormap(TC_DEFAULT, color))
+		v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale/scale, faceRank, trans | VFLAGS, v.getColormap(TC_DEFAULT, color))
 
 		if player.name == p.name then
 			v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale, PATCH["CHILI"][(leveltime / 4) % 8], trans | VFLAGS)
@@ -1206,7 +1197,7 @@ local function drawDefault(v, player, scoreTable, gui)
 
 	-- Draw placeholder score
 	if scoreTable == nil then
-		drawScore(v, player, 1, x, y, gui, {["players"] = { { name = UNCLAIMED, color = 0 } }, ["time"] = 0, ["flags"] = 0})
+		drawScore(v, player, 1, x, y, gui, {["players"] = { { name = UNCLAIMED, color = 0, faker = true } }, ["time"] = 0, ["flags"] = 0})
 	else
 		for pos, score in ipairs(scoreTable) do
 			if pos > 5 then break end
@@ -1333,13 +1324,6 @@ function cachePatches(v)
 
 		PATCH["NORANK"] = v.cachePatch("M_NORANK")
 
-		PATCH["FACERANK"] = {}
-		PATCH["FACEWANT"] = {}
-		for skin in skins.iterate do
-			PATCH["FACERANK"][skin.name] = RINGS and v.getSprite2Patch(#skin, SPR2_XTRA, A) or v.cachePatch(skin.facerank)
-			PATCH["FACEWANT"][skin.name] = RINGS and v.getSprite2Patch(#skin, SPR2_XTRA, B) or v.cachePatch(skin.facewant)
-		end
-
 		PATCH["SPB"] = v.cachePatch("K_ISSPB")
 		PATCH["INV"] = {}
 		for i = 1, 6 do
@@ -1454,7 +1438,8 @@ local function saveTime(player)
 	local ghosts = {}
 	local gamers = getGamers()
 	for _, p in ipairs(gamers) do
-		local pskin = skins[p.mo.skin]
+		local skin = p.mo.skin
+		local pskin = skins[skin]
 		local ghost = GhostIsRecording(p) and GhostStopRecording(p) or nil
 		if ghost and ghosts then
 			table.insert(ghosts, ghost)
@@ -1464,9 +1449,14 @@ local function saveTime(player)
 		local rs = RINGS and p.hostmod and p.hostmod.restat
 		local speed = rs and rs.speed or p.HMRs or pskin.kartspeed
 		local weight = rs and rs.weight or p.HMRw or pskin.kartweight
+		local appear = APPEAR_GetAppearance and APPEAR_GetAppearance(p, skin)
+		if not (appear and appear ~= "default") then
+			appear = ""
+		end
 		table.insert(players, player_t(
 			p.name,
-			p.mo.skin,
+			skin,
+			appear,
 			p.skincolor,
 			stat_t(speed, weight)
 		))
@@ -1797,18 +1787,6 @@ local function interThink()
 end
 addHook("IntermissionThinker", interThink)
 addHook("VoteThinker", interThink)
-
-local cv_highresportrait
-function useHighresPortrait()
-	if cv_higresportrait == nil then
-		cv_highresportrait = CV_FindVar("highresportrait") or false
-	end
-	if cv_highresportrait then
-		return cv_highresportrait.value ~= cv_lb_highresportrait.value
-	end
-
-	return cv_lb_highresportrait.value
-end
 
 -- Returns the values clamed between min, max
 function clamp(min_v, v, max_v)

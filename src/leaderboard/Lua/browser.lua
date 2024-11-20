@@ -14,6 +14,7 @@ local ZoneAct = lb_ZoneAct
 local TicsToTime = lb_TicsToTime
 local drawNum = lb_draw_num
 local getThrowDir = lb_throw_dir
+local getPortrait = lb_get_portrait
 
 -- lb_store.lua
 local GetMapRecords = lb_get_map_records
@@ -33,29 +34,6 @@ local cv_showallstats = CV_RegisterVar({
 rawset(_G, "lb_cv_showallstats", cv_showallstats)
 
 local cv_kartencore
-
-local cv_highresportrait
-local cv_lb_highresportrait -- Eee maybe need to share it between lb modules somehow?
-local function useHighresPortrait()
-	if cv_highresportrait then
-		return cv_highresportrait.value ~= cv_lb_highresportrait.value
-	end
-
-	return cv_lb_highresportrait and cv_lb_highresportrait.value
-end
-
-local function lookupCvars()
-	if not cv_highresportrait then
-		cv_highresportrait = CV_FindVar("highresportrait")
-	end
-
-	if not cv_lb_highresportrait then
-		cv_lb_highresportrait = CV_FindVar("lb_highresportrait")
-	end
-end
-
-addHook("MapLoad", lookupCvars)
-addHook("NetVars", lookupCvars)
 
 local function mapIndexOffset(n)
 	return (mapIndex + n + #maps - 1) % #maps + 1
@@ -416,32 +394,17 @@ local colorFlags = {
 	[1] = 0
 }
 
-local function getFace(v, skin)
-	if RINGS then
-		return v.getSprite2Patch(#skin, SPR2_XTRA, A)
-	else
-		return v.cachePatch(useHighresPortrait() and skin.facewant or skin.facerank)
-	end
-end
-
-local norank
 local function drawScore(v, i, pos, score, player)
 	local y = scoresY + i * 18
 	local textFlag = colorFlags[pos%2]
 	local ofs = 0
-
-	if not norank then
-		norank = v.cachePatch("M_NORANK")
-	end
 
 	-- position
 	drawNum(v, column[1], y, pos)
 
 	-- facerank
 	for i, p in ipairs(score.players) do
-		local skin = skins[p.skin]
-		local facerank = skin and getFace(v, skin) or norank
-		local downscale = (facerank ~= norank and useHighresPortrait()) and 2 or 1
+		local facerank, downscale = getPortrait(v, p)
 		local color = p.color < MAXSKINCOLORS and p.color or 0
 		v.drawScaled((column[1] + ofs)<<FRACBITS, y<<FRACBITS, FRACUNIT/downscale, facerank, 0, v.getColormap(TC_DEFAULT, color))
 

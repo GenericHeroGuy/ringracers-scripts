@@ -11,10 +11,11 @@ rawset(_G, "lb_score_t", function(flags, time, starttime, splits, players, id)
 	}
 end)
 
-rawset(_G, "lb_player_t", function(name, skin, color, stat)
+rawset(_G, "lb_player_t", function(name, skin, appear, color, stat)
 	return {
 		["name"]   = name,
 		["skin"]   = skin,
+		["appear"] = appear,
 		["color"]  = color,
 		["stat"]  = stat,
 	}
@@ -176,6 +177,33 @@ rawset(_G, "lb_draw_num", function(v, x, y, num, flags)
 		end
 	else
 		v.drawNum(x, y, num, flags) -- Fun Fact: This function instantly segfaults in Dr. Robotnik's Ring Racers!
+	end
+end)
+
+local cv_lb_highresportrait = CV_RegisterVar({
+	name = "lb_highresportrait",
+	defaultvalue = "Off",
+	flags = 0,
+	PossibleValue = CV_OnOff,
+})
+local norank, appear, cv_highresportrait
+rawset(_G, "lb_get_portrait", function(v, p) -- player_t, not the userdata!
+	if not norank then
+		norank = v.cachePatch("M_NORANK")
+		appear = APPEAR_HUD
+		cv_highresportrait = CV_FindVar("highresportrait") or { value = 0 }
+	end
+
+	local hires = cv_highresportrait.value ~= cv_lb_highresportrait.value
+	if p.faker then
+		return norank, 1
+	elseif RINGS then
+		local k = hires and B or A
+		return v.getSprite2Patch(p.skin, SPR2_XTRA, k), k+1
+	else
+		local k = hires and "facewant" or "facerank"
+		local pskin = p.appear ~= "" and appear and appear[p.skin] and appear[p.skin][p.appear] or skins[p.skin]
+		return pskin and v.cachePatch(pskin[k]) or norank, pskin and hires and 2 or 1
 	end
 end)
 
