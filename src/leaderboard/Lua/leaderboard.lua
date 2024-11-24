@@ -46,6 +46,10 @@ local RingsLap = lb_rings_lap
 local RingsFinish = lb_rings_finish
 local RingsSpawn = lb_rings_spawn
 
+-- lb_targets.lua
+local TargetsLeft = lb_targets_left
+local DrawTargets = lb_draw_targets
+
 --------------------------------------------
 
 local RINGS = VERSION == 2
@@ -305,7 +309,13 @@ local function initLeaderboard(player)
 	else
 		disable = disable or not canstart()
 	end
-	disable = $ or not cv_enable.value or not (maptol & RACETOL) or (RINGS and gametype ~= GT_ONLINETA)
+	local tol, gt = mapheaderinfo[gamemap].typeoflevel
+	if RINGS then
+		gt = tol & TOL_BATTLE and GT_BATTLE or GT_ONLINETA
+	else
+		gt = tol & TOL_MATCH and GT_MATCH or GT_RACE
+	end
+	disable = $ or not cv_enable.value or gametype ~= gt
 
 	-- Restore encore mode to initial value
 	if disable and EncoreInitial != nil then
@@ -343,18 +353,8 @@ local function doyoudare(player)
 end
 
 COM_AddCommand("retry", function(player)
-	if doyoudare(player) then
-		-- Verify valid race level
-		if not (mapheaderinfo[gamemap].typeoflevel & RACETOL) then
-			CONS_Printf(player, "Battle maps are not supported")
-			return
-		end
-
-		-- Prevents bind crash
-		if leveltime < 20 then
-			return
-		end
-		nextMap = G_BuildMapName(gamemap)
+	if doyoudare(player) and leveltime >= 20 then
+		nextMap = gamemap
 	end
 end)
 
@@ -366,12 +366,6 @@ end)
 
 COM_AddCommand("levelselect", function(player)
 	if not doyoudare(player) then return end
-
-	-- TODO: allow in battle
-	if mapheaderinfo[gamemap].typeoflevel & (RINGS and TOL_BATTLE or TOL_MATCH) then
-		CONS_Printf(player, "Please exit battle first")
-		return
-	end
 
 	if not InitBrowser then
 		print("Browser is not loaded")
@@ -582,13 +576,7 @@ COM_AddCommand("changelevel", function(player, ...)
 		return
 	end
 
-	-- Verify valid race level
-	if not (mapheaderinfo[mapnum].typeoflevel & RACETOL) then
-		CONS_Printf(player, "Battle maps are not supported")
-		return
-	end
-
-	nextMap = G_BuildMapName(mapnum)
+	nextMap = mapnum
 end)
 
 COM_AddCommand("lb_encore", function(player)
@@ -1288,11 +1276,13 @@ local function drawMode(v, pos, flag)
 	return pos + 1
 end
 
-local function drawScoreboard(v, player)
+local function drawScoreboard(v, player, c)
 	if disable then return end
 	if player != displayplayers[0] then return end
 
 	cachePatches(v)
+
+	if not RINGS and gametype == GT_MATCH then DrawTargets(v, player, c) end
 
 	local gui = cv_gui.value or drawState == DS_BROWSER
 
@@ -1526,7 +1516,9 @@ local function regLap(player)
 end
 
 local function changeMap()
-	COM_BufInsertText(server, "map " + nextMap + " -force -gametype "..(RINGS and GT_ONLINETA or "race"))
+	local gt = RINGS and GT_ONLINETA or GT_RACE
+	if mapheaderinfo[nextMap].typeoflevel & (RINGS and TOL_BATTLE or TOL_MATCH) then gt = (RINGS and GT_BATTLE or GT_MATCH) end
+	COM_BufInsertText(server, ("map %d -g %d"):format(nextMap, gt))
 	nextMap = nil
 end
 
@@ -1669,8 +1661,17 @@ local function think()
 	ScoreTable = MapRecords[ST_SEP & Flags]
 
 	for _, p in ipairs(gamers) do
+		local finished = p.laps >= mapheaderinfo[gamemap].numlaps + (RINGS and 1 or 0)
+		if gametype == (RINGS and GT_BATTLE or GT_MATCH) then
+			finished = TargetsLeft() == 0
+			-- temp workaround
+			if RINGS and finished and not TimeFinished then
+				TimeFinished = leveltime
+				saveTime(p)
+			end
+		end
 		-- must be done before browser control
-		if p.laps >= mapheaderinfo[gamemap].numlaps + (RINGS and 1 or 0) and TimeFinished == 0 then
+		if finished and TimeFinished == 0 then
 			if RINGS then
 				TimeFinished, StartTime = RingsFinish(p)
 			else

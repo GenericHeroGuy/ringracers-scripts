@@ -6,5 +6,6 @@ Lua/lb_store.lua
 Lua/lbcomms.lua
 Lua/bghost.lua
 Lua/browser.lua
+Lua/lb_targets.lua
 Lua/**
 **

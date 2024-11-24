@@ -6,6 +6,7 @@ local modes = nil
 local mode = 1
 local prefMode = nil
 local ModeSep
+local gtselect
 
 ---- Imported functions ----
 
@@ -24,6 +25,8 @@ local GetMapRecords = lb_get_map_records
 local RINGS = VERSION == 2
 local TURNING = RINGS and "turning" or "driftturn"
 local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
+local TOL_BATTLE = TOL_BATTLE or TOL_MATCH
+local BT_CUSTOM1 = BT_CUSTOM1 or 1<<13
 
 local cv_showallstats = CV_RegisterVar({
 	name = "lb_showallstats",
@@ -36,11 +39,11 @@ rawset(_G, "lb_cv_showallstats", cv_showallstats)
 local cv_kartencore
 
 local function mapIndexOffset(n)
-	return (mapIndex + n + #maps - 1) % #maps + 1
+	return (mapIndex + n + #maps[gtselect] - 1) % #maps[gtselect] + 1
 end
 
 local function getMap(offset)
-	return maps[mapIndexOffset(offset or 0)]
+	return maps[gtselect][mapIndexOffset(offset or 0)]
 end
 
 local function updateModes()
@@ -65,29 +68,35 @@ local function updateMapIndex(n)
 	mapIndex = mapIndexOffset(n)
 	scrollPos = 1
 
-	MapRecords = GetMapRecords(maps[mapIndex], ModeSep)
+	MapRecords = GetMapRecords(getMap(), ModeSep)
 
 	updateModes()
 end
 
--- initialize maps with racemaps only
+-- initialize map lists
 local function loadMaps()
 	maps = {}
 	local hell = {}
 	for i = 0, #mapheaderinfo do
 		local map = mapheaderinfo[i]
-		if map and map.typeoflevel & TOL_RACE then
+		if map then
+			local tol = map.typeoflevel & (TOL_RACE|TOL_BATTLE)
+			if not (tol == TOL_RACE or tol == TOL_BATTLE) then continue end
 			if map.menuflags & LF2_HIDEINMENU then
-				table.insert(hell, i)
+				if not hell[tol] then hell[tol] = {} end
+				table.insert(hell[tol], i)
 			else
-				table.insert(maps, i)
+				if not maps[tol] then maps[tol] = {} end
+				table.insert(maps[tol], i)
 			end
 		end
 	end
 
 	-- append hell maps
-	for _, map in ipairs(hell) do
-		table.insert(maps, map)
+	for tol, set in pairs(hell) do
+		for _, map in ipairs(set) do
+			table.insert(maps[tol], map)
+		end
 	end
 end
 addHook("MapLoad", function()
@@ -471,9 +480,10 @@ local function initBrowser(modeSep)
 	if not maps then loadMaps() end
 
 	ModeSep = modeSep
+	gtselect = mapheaderinfo[gamemap].typeoflevel & (TOL_RACE|TOL_BATTLE)
 
 	-- set mapIndex to current map
-	for i, m in ipairs(maps) do
+	for i, m in ipairs(maps[gtselect]) do
 		if m == gamemap then
 			mapIndex = i
 			break
@@ -506,13 +516,13 @@ local function resetKeyRepeat()
 	repeatCount = 0
 end
 
-local ValidButtons = BT_ACCELERATE | BT_BRAKE | BT_DRIFT | BT_ATTACK
+local ValidButtons = BT_ACCELERATE | BT_BRAKE | BT_DRIFT | BT_ATTACK | BT_CUSTOM1
 
 -- return value indicates we want to exit the browser
 local function controller(player)
 	-- mid-game join
 	if not maps then loadMaps() end
-	if not MapRecords then MapRecords = GetMapRecords(maps[mapIndex], ModeSep) end
+	if not MapRecords then MapRecords = GetMapRecords(getMap(), ModeSep) end
 	if not modes then updateModes() end
 
 	keyRepeat = max(0, $ - 1)
@@ -534,7 +544,7 @@ local function controller(player)
 			S_StartSound(nil, sfx_pop)
 			return true
 		elseif cmd.buttons & BT_ACCELERATE then
-			COM_BufInsertText(player, "changelevel "..G_BuildMapName(maps[mapIndex]))
+			COM_BufInsertText(player, "changelevel "..G_BuildMapName(getMap()))
 			return true
 		elseif cmd.buttons & BT_ATTACK then
 			COM_BufInsertText(player, "lb_encore")
@@ -556,6 +566,9 @@ local function controller(player)
 				mode = $ % #modes + 1
 				prefMode = modes[mode]
 			end
+		elseif cmd.buttons & BT_CUSTOM1 then
+			gtselect = gtselect == TOL_RACE and TOL_BATTLE or TOL_RACE
+			updateMapIndex(0)
 		end
 	end
 end
