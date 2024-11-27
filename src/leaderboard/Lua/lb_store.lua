@@ -724,7 +724,9 @@ local function loadit()
 	-- might as well make a cache now instead of in netvars
 	makecache()
 end
-addHook("MapChange", loadit)
+addHook("MapChange", function()
+	if not replayplayback then loadit() end
+end)
 
 local function netvars(net)
 	if replayplayback then return end
