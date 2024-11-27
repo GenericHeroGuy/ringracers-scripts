@@ -766,7 +766,7 @@ end)
 
 -- players is taken soooo
 local replayers = {}
-local ghostwatching, ghostcam
+local ghostwatching, ghostcam, ghostmenu, ghostmenusel
 
 -- spawns an mobj that doesn't sync in netgames
 local function SpawnLocal(x, y, z, type)
@@ -821,7 +821,12 @@ local function StartPlaying(record)
 			starttime = record.starttime,
 			curtic = 0, -- ghost's leveltime
 			paused = false,
+			startpaused = false,
 			fastforward = false,
+			doforward = false,
+			rewinding = false,
+			dorewind = false,
+			ticlog = {},
 			mo = mo,
 			gmomx = 0,
 			gmomy = 0,
@@ -895,11 +900,15 @@ rawset(_G, "lb_ghost_start_playing", function(record)
 	end
 end)
 
-local function StopWatching()
+local function StopWatching(change)
 	if ghostwatching == nil then return end
 	ghostwatching = nil
-	consoleplayer.awayviewmobj = nil
-	consoleplayer.awayviewtics = 0
+	if not change then
+		consoleplayer.awayviewmobj = nil
+		consoleplayer.awayviewtics = 0
+	end
+	hud.enable("time")
+	hud.enable("textspectator")
 	-- keep the ghostcam
 end
 
@@ -929,7 +938,7 @@ end
 
 addHook("MapChange", function()
 	replayers = {}
-	ghostwatching = nil
+	StopWatching(true)
 end)
 
 local function SpawnDriftSparks(r, direction)
@@ -1385,10 +1394,14 @@ local function RunGhosts()
 	for r in pairs(replayers) do
 		errorghost = r
 		if RINGS then
-			if r.curtic == r.starttime then
+			-- pause when ghost touches finish line at the start
+			if r.curtic == r.starttime and not r.startpaused then
+				r.startpaused = true
 				r.paused = true
 			end
-			if consoleplayer.onlineta.started and r.curtic <= r.starttime then
+
+			-- race started, fast-forward to starttime
+			if consoleplayer.onlineta.started and r.curtic <= r.starttime and r.paused then
 				r.paused = false
 				while r.curtic < r.starttime do
 					if r.file:empty() then
@@ -1398,8 +1411,13 @@ local function RunGhosts()
 				end
 			end
 		end
-		if not r.paused then
-			for i = 1, r.fastforward and 3 or 1 do
+		if not r.paused or r.doforward or r.dorewind then
+			if r.doforward and not r.paused then
+				r.fastforward = not $
+			end
+
+			local numtics = r.fastforward and not r.paused and 3 or 1
+			for i = 1, numtics do
 				if r.file:empty() then
 					StopPlaying(r)
 					if not ghostwatching then
@@ -1408,8 +1426,46 @@ local function RunGhosts()
 					end
 					break
 				end
+
+				-- flip the playback direction
+				local flip = r.dorewind or r.rewinding and not r.curtic
+				if r.paused then
+					if r.rewinding then
+						flip = r.doforward or not r.curtic
+					else
+						flip = r.dorewind
+					end
+				end
+				if flip then
+					r.dorewind = false
+					if r.rewinding then
+						r.file:seek(r.ticlog[r.curtic])
+					end
+					r.rewinding = not $
+					P_SetOrigin(r.mo, r.mo.x - r.gmomx, r.mo.y - r.gmomy, r.mo.z - r.gmomz)
+					r.realangle = $ - r.gmoma
+					r.gmomx = -$
+					r.gmomy = -$
+					r.gmomz = -$
+					r.gmoma = -$
+				end
+
+				if r.rewinding then
+					r.curtic = $ - 1
+					r.file:seek(r.ticlog[r.curtic])
+				elseif not r.ticlog[r.curtic] then
+					-- log the offsets of all tics for rewinding
+					-- should've used a RISC architecture for ghost files :^)
+					r.ticlog[r.curtic] = r.file:tell()
+				end
+
 				PlayGhostTic(r)
+				if r.rewinding then
+					r.curtic = $ - 1
+				end
 			end
+			r.doforward = false
+			r.dorewind = false
 		end
 	end
 
@@ -1425,7 +1481,51 @@ end
 
 local ghostcustom1 = 0
 local ghostcustom2 = 0
-local ghostcustom3 = 0
+local inputleft = 0
+local inputright = 0
+local inputup = 0
+local inputdown = 0
+
+local function menusound()
+	S_StartSound(nil, sfx_menu1)
+end
+
+local menuoptions = {
+	{
+		label = function() return "Player" end,
+		draw = function(v, x, y, flags, cmap)
+			v.draw(x, y, v.cachePatch("M_PNVIEW"), flags, cmap)
+		end,
+		change = function() NextWatch() end,
+	},
+	{
+		label = function() return ghostwatching.paused and "Resume" or "Pause" end,
+		draw = function(v, x, y, flags, cmap)
+			v.draw(x, y, v.cachePatch(ghostwatching.paused and "M_PRESUM" or "M_PPAUSE"), flags, cmap)
+		end,
+		change = function() ghostwatching.paused = not $ end,
+	},
+	{
+		label = function() return ghostwatching.paused and "Play one tic" or "Fast Forward" end,
+		draw = function(v, x, y, flags, cmap)
+			if ghostwatching.fastforward then
+				cmap = v.getColormap(TC_RAINBOW, SKINCOLOR_JAWZ)
+			end
+			v.draw(x, y, v.cachePatch(ghostwatching.paused and "M_PFADV" or "M_PFFWD"), flags, cmap)
+		end,
+		change = function() ghostwatching.doforward = true end,
+	},
+	{
+		label = function() return ghostwatching.paused and "Rewind one tic" or "Rewind" end,
+		draw = function(v, x, y, flags, cmap)
+			if ghostwatching.rewinding then
+				cmap = v.getColormap(TC_RAINBOW, SKINCOLOR_JAWZ)
+			end
+			v.draw(x, y, v.cachePatch(ghostwatching.paused and "M_PSTEPB" or "M_PREW"), flags, cmap)
+		end,
+		change = function() ghostwatching.dorewind = true end,
+	},
+}
 
 addHook("ThinkFrame", function()
 	if defrosting then return end
@@ -1452,14 +1552,31 @@ addHook("ThinkFrame", function()
 	else
 		ghostcustom2 = 0
 	end
-	if consoleplayer.cmd.buttons & BT_CUSTOM3 then
-		ghostcustom3 = $ + 1
+	if consoleplayer.cmd[TURNING] >= 200 then
+		inputright = $ + 1
 	else
-		ghostcustom3 = 0
+		inputright = 0
+	end
+	if consoleplayer.cmd[TURNING] <= -200 then
+		inputleft = $ + 1
+	else
+		inputleft = 0
+	end
+	local throwdir = getThrowDir(consoleplayer)
+	if throwdir == 1 then
+		inputup = $ + 1
+	else
+		inputup = 0
+	end
+	if throwdir == -1 then
+		inputdown = $ + 1
+	else
+		inputdown = 0
 	end
 
 	if ghostcustom1 == 1 then
-		ghostwatching.fastforward = not $
+		ghostmenu = not $
+		if ghostmenusel == nil then ghostmenusel = 1 end
 	end
 
 	if ghostcustom2 == 1 then
@@ -1468,10 +1585,6 @@ addHook("ThinkFrame", function()
 			ghostcam.flags = MF_NOTHINK|MF_NOSECTOR|MF_NOBLOCKMAP|MF_NOCLIP|MF_NOCLIPHEIGHT|MF_NOCLIPTHING
 		end
 		NextWatch()
-	end
-
-	if ghostcustom3 == 1 then
-		ghostwatching.paused = not $
 	end
 
 	local ok, err = pcall(RunGhosts)
@@ -1498,6 +1611,8 @@ addHook("ThinkFrame", function()
 
 	local r = ghostwatching
 	if r then
+		hud.disable("time")
+		hud.disable("textspectator")
 		local fspecial = not RINGS and r.fakeframe == FS_POGO and r.lastfspecial or r.fspecial
 		r.lastfspecial = fspecial
 		if fspecial == "driftl" and r.angofs < ANG2 then
@@ -1512,21 +1627,27 @@ addHook("ThinkFrame", function()
 		local height = 80*mapobjectscale
 
 		local inputofs = 0
-		if consoleplayer.cmd[TURNING] >= 200 then
-			inputofs = ANGLE_90
-		elseif consoleplayer.cmd[TURNING] <= -200 then
-			inputofs = -ANGLE_90
-		end
-		local throwdir = getThrowDir(consoleplayer)
-		if throwdir == 1 then -- BT_FORWARD
-			if inputofs then
-				inputofs = inputofs/2
-			else
-				height = $ + 200*mapobjectscale
-				dist = $ + 50*mapobjectscale
+		if ghostmenu then
+			if inputright == 1 then menusound(); ghostmenusel = $ == 1 and #menuoptions or $ - 1 end
+			if inputleft == 1 then menusound(); ghostmenusel = $ % #menuoptions + 1 end
+			if inputup == 1 then menusound(); menuoptions[ghostmenusel].change(1) end
+			if inputdown == 1 then menusound(); menuoptions[ghostmenusel].change(-1) end
+		else
+			if inputright then
+				inputofs = ANGLE_90
+			elseif inputleft then
+				inputofs = -ANGLE_90
 			end
-		elseif throwdir == -1 then -- BT_BACKWARD
-			inputofs = inputofs/2 + ANGLE_180
+			if inputup then
+				if inputofs then
+					inputofs = inputofs/2
+				else
+					height = $ + 200*mapobjectscale
+					dist = $ + 50*mapobjectscale
+				end
+			elseif inputdown then
+				inputofs = inputofs/2 + ANGLE_180
+			end
 		end
 		if r.gravityflip then height = -$ end
 
@@ -1655,6 +1776,9 @@ hud.add(function(v, p)
 		flags = ($ & ~V_SNAPTOTOP) | V_MONOSPACE|V_SNAPTOBOTTOM
 		v.drawString(160, 161, speed, flags|trans, "center")
 
+		local time = max(0, ghostwatching.curtic - ghostwatching.starttime)
+		v.drawKartString(205, RINGS and 8 or 12, string.format("%02d'%02d\"%02d", time/TICRATE/60, time/TICRATE%60, G_TicsToCentiseconds(time)), flags|trans)
+
 		if ghostwatching.drifthilitecolor then
 			local color
 			if ghostwatching.drifthilitecolor == 1 then
@@ -1687,6 +1811,15 @@ hud.add(function(v, p)
 			v.draw(142, 142, v.cachePatch(ringbox[ghostwatching.hasitem]), flags|trans)
 			ghostwatching.fakeawardtimer = $ - 1
 		end
+	end
+
+	if ghostwatching and ghostmenu then
+		local flags = V_SNAPTOTOP
+		local cmap = v.getColormap(TC_RAINBOW, SKINCOLOR_GOLD)
+		for i, opt in ipairs(menuoptions) do
+			opt.draw(v, i*16+32, 0, flags, i == ghostmenusel and cmap or nil)
+		end
+		v.drawString(48 + 16*#menuoptions/2, 16, menuoptions[ghostmenusel].label(), flags|V_ALLOWLOWERCASE, "center")
 	end
 
 	--[[

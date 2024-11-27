@@ -1452,7 +1452,7 @@ local function saveTime(player)
 		))
 	end
 
-	if #ghosts then
+	if ghosts and #ghosts then
 		extraflags = $ | F_HASGHOST
 	end
 

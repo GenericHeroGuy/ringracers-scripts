@@ -162,7 +162,7 @@ rawset(_G, "lb_throw_dir", function(p)
 	if RINGS then
 		return p.throwdir
 	else
-		return p.kartstuff[k_throwdir]
+		return p.spectator and max(-1, min(p.cmd.forwardmove, 1)) or p.kartstuff[k_throwdir]
 	end
 end)
 
@@ -261,7 +261,13 @@ local reader = { __index = {
 	end,
 	empty = function(self)
 		return self[2] > self[3]
-	end
+	end,
+	tell = function(self)
+		return self[2]
+	end,
+	seek = function(self, ofs)
+		self[2] = ofs
+	end,
 } }
 
 rawset(_G, "lb_string_reader", function(data)
