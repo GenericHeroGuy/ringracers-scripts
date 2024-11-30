@@ -470,25 +470,35 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 	if roulette and not ghost.lastroulette then
 		tins(specials, GS_ROULETTE)
 	end
+	ghost.lastroulette = roulette
+
 	local itemtype, itemamount = translate(player, "itemtype"), translate(player, "itemamount")
-	local havesneaker = itemtype == KITEM_SNEAKER and itemamount > 0
-	if havesneaker and not ghost.havesneaker then
-		tins(specials, GS_GETITEM)
-	elseif not havesneaker and ghost.havesneaker then
-		local combined = false
-		for i, v in ipairs(specials) do
-			if v == GS_BOOSTFLAME then
-				specials[i] = GS_USESNEAKER
-				combined = true
-				break
-			end
-		end
-		if not combined then
+	if not RINGS and gametype == GT_MATCH then
+		if itemtype == KITEM_POGOSPRING and itemamount > ghost.lastamount then
+			tins(specials, GS_GETITEM)
+		elseif itemamount < ghost.lastamount then
 			tins(specials, GS_NOITEM)
 		end
+		ghost.lastamount = itemamount
+	else
+		local havesneaker = itemtype == KITEM_SNEAKER and itemamount > 0
+		if havesneaker and not ghost.havesneaker then
+			tins(specials, GS_GETITEM)
+		elseif not havesneaker and ghost.havesneaker then
+			local combined = false
+			for i, v in ipairs(specials) do
+				if v == GS_BOOSTFLAME then
+					specials[i] = GS_USESNEAKER
+					combined = true
+					break
+				end
+			end
+			if not combined then
+				tins(specials, GS_NOITEM)
+			end
+		end
+		ghost.havesneaker = havesneaker
 	end
-	ghost.lastroulette = roulette
-	ghost.havesneaker = havesneaker
 
 	local aizdriftstrat = translate(player, "aizdriftstrat")
 	local sliptide = aizdriftstrat and not drift and P_IsObjectOnGround(player.mo) and player.playerstate == PST_LIVE
@@ -670,6 +680,7 @@ local function StartRecording(player)
 		lastrespawn = false,
 		lastroulette = false,
 		havesneaker = false,
+		lastamount = 0,
 		lastsliptide = false,
 		lastspindash = 0,
 		lasttrickpanel = 0,
@@ -1167,7 +1178,13 @@ local function PlayGhostTic(r)
 		elseif flags == GS_USERING then
 			SpawnRing(r, true)
 		elseif flags >= GS_NOITEM and flags <= GS_GETITEM then
-			r.hasitem = flags - GS_NOITEM
+			if flags == GS_GETITEM and r.hasitem >= 2 then
+				r.hasitem = $ + 1
+			elseif flags == GS_NOITEM and r.hasitem > 2 then
+				r.hasitem = $ - 1
+			else
+				r.hasitem = flags - GS_NOITEM
+			end
 		elseif flags >= GS_RINGBOX and flags <= GS_GETJACKPOT then
 			r.hasitem = GS_RINGBOX - flags - 1 -- we're going negative folks!
 			r.fakeawardtimer = TICRATE
@@ -1803,9 +1820,12 @@ hud.add(function(v, p)
 		if ghostwatching.hasitem == 1 then
 			trans = V_HUDTRANSHALF
 			v.draw(142, 142, v.cachePatch("K_ISSHOE"), flags|trans, v.getColormap(TC_RAINBOW, ghostwatching.mo.color))
-		elseif ghostwatching.hasitem == 2 then
+		elseif ghostwatching.hasitem >= 2 then
 			trans = V_HUDTRANS
-			v.draw(142, 142, v.cachePatch("K_ISSHOE"), flags|trans)
+			v.draw(142, 142, v.cachePatch(not RINGS and gametype == GT_MATCH and "K_ISPOGO" or "K_ISSHOE"), flags|trans)
+			if ghostwatching.hasitem > 2 then
+				v.drawString(128, 142, ghostwatching.hasitem - 1, flags|trans, "right")
+			end
 		elseif ghostwatching.hasitem < 0 and (ghostwatching.hasitem == -1 or ghostwatching.fakeawardtimer) then
 			trans = V_HUDTRANS
 			v.draw(142, 142, v.cachePatch(ringbox[ghostwatching.hasitem]), flags|trans)
