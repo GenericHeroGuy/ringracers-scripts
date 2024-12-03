@@ -257,7 +257,7 @@ local function recordsIdentical(a, b)
 	return true
 end
 
-local function mergeStore(other, deletelist)
+local function mergeStore(other, deletelist, othernext)
 	-- first, get the IDs of all records in here
 	local my_mapforid = {}
 	for map, checksums in pairs(LiveStore) do
@@ -279,7 +279,7 @@ local function mergeStore(other, deletelist)
 	local gaps = {} -- which maps might have gaps
 
 	-- check the ids of the other store's records to see if anything moved
-	for id = 1, NextID do
+	for id = 1, max(NextID, othernext) do
 		local my, ot = my_mapforid[id], other_mapforid[id]
 		if not ot or deletelist[id] then
 			-- server doesn't have record anymore
@@ -737,7 +737,6 @@ local function netvars(net)
 		loadit()
 		local diff = loadColdStore(StringReader(net("Yes I would like uhhh")))
 		local deleted = StringReader(net("two strings please"))
-		NextID = net("oh and a number")
 		local deletions = {}
 		while not deleted:empty() do
 			deletions[deleted:readnum()] = true
@@ -745,7 +744,9 @@ local function netvars(net)
 		if coldloaded then
 			diff = applyColdStore($)
 		end
-		mergeStore(diff, deletions)
+		local nextid = net("oh and a number")
+		mergeStore(diff, deletions, nextid)
+		NextID = nextid
 	end
 end
 addHook("NetVars", netvars)
