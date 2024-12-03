@@ -912,11 +912,12 @@ rawset(_G, "lb_ghost_start_playing", function(record)
 end)
 
 local function StopWatching(change)
-	if ghostwatching == nil then return end
-	ghostwatching = nil
-	if not change then
-		consoleplayer.awayviewmobj = nil
-		consoleplayer.awayviewtics = 0
+	if ghostwatching ~= nil then
+		ghostwatching = nil
+		if not change then
+			consoleplayer.awayviewtics = 0
+			consoleplayer.awayviewmobj = nil
+		end
 	end
 	hud.enable("time")
 	hud.enable("textspectator")
@@ -935,7 +936,7 @@ local function NextWatch()
 		end
 	until ghost == ghostwatching or not ghost or ghost == start
 	-- nothing appropriate.
-	ghostwatching = nil
+	StopWatching()
 end
 
 local function StopPlaying(replay)
@@ -1437,10 +1438,6 @@ local function RunGhosts()
 			for i = 1, numtics do
 				if r.file:empty() then
 					StopPlaying(r)
-					if not ghostwatching then
-						consoleplayer.awayviewtics = 0
-						consoleplayer.awayviewmobj = nil
-					end
 					break
 				end
 
@@ -1616,10 +1613,6 @@ addHook("ThinkFrame", function()
 		DeleteGhost(id)
 
 		StopPlaying(errorghost)
-		if not ghostwatching then
-			consoleplayer.awayviewtics = 0
-			consoleplayer.awayviewmobj = nil
-		end
 	end
 
 	if consoleplayer.cmd.buttons & (BT_ACCELERATE|BT_BRAKE|BT_ATTACK|BT_DRIFT) then
