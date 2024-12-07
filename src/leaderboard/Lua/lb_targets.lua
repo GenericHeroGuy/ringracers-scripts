@@ -14,7 +14,7 @@ rawset(_G, "lb_targets_left", function() return targetsleft end)
 if VERSION == 2 then
 -- Ring Racers already has prison break. just keep count of the targets
 addHook("PlayerSpawn", function(p)
-	if not LB_IsRunning() or gametype ~= GT_BATTLE or targetlist then return end
+	if gametype ~= GT_LEADERBATTLE or targetlist then return end
 	targetlist = {}
 	for mt in mapthings.iterate do
 		local type = mt.type
@@ -25,7 +25,7 @@ addHook("PlayerSpawn", function(p)
 	targetsleft = #targetlist
 end)
 
-local function hitem() targetsleft = $ - 1 end
+local function hitem() if targetlist then targetsleft = $ - 1 end end
 addHook("MobjDeath", hitem, MT_BATTLECAPSULE)
 addHook("MobjDeath", hitem, MT_CDUFO)
 

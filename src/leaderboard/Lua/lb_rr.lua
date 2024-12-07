@@ -17,6 +17,19 @@ G_AddGametype({
 	intermissiontype = 2,
 })
 
+G_AddGametype({
+	name = "Leaderbattle",
+	identifier = "LEADERBATTLE",
+	rules = GTR_SPHERES|GTR_BUMPERS|GTR_PAPERITEMS|GTR_POWERSTONES|GTR_KARMA|GTR_ITEMARROWS|GTR_PRISONS|GTR_BATTLESTARTS|GTR_POINTLIMIT|GTR_TIMELIMIT|GTR_OVERTIME|GTR_CLOSERPLAYERS
+	-- skip title card, also mutes lap sound, also hides freeplay for some reason
+	|GTR_SPECIALSTART
+	-- continuous music
+	|GTR_NOPOSITION,
+	typeoflevel = TOL_BATTLE,
+	speed = 0,
+	intermissiontype = 2,
+})
+
 local cv_ringboxes = CV_RegisterVar({
 	name = "lb_ringboxes",
 	flags = CV_NETVAR,
@@ -62,14 +75,53 @@ addHook("MobjThinker", function(mo)
 	end
 end, MT_RANDOMITEM)
 
+addHook("ThinkFrame", function()
+	local starttime = LB_StartTime()
+
+	-- hide/show item boxes in battle
+	if gametype == GT_LEADERBATTLE then
+		if not leveltime then
+			for mo in mobjs.iterate() do
+				if mo.type == MT_RANDOMITEM then
+					mo.renderflags = $ | RF_ADD|RF_TRANS30
+					mo.flags = $ | MF_NOCLIPTHING|MF_NOBLOCKMAP
+				end
+			end
+		elseif leveltime == starttime then
+			for mo in mobjs.iterate() do
+				if mo.type == MT_RANDOMITEM then
+					mo.renderflags = $ & ~(RF_ADD|RF_TRANS30)
+					mo.flags = $ & ~(MF_NOCLIPTHING|MF_NOBLOCKMAP)
+				end
+			end
+		end
+	end
+
+	if gametype == GT_ONLINETA or gametype == GT_LEADERBATTLE then
+		for p in players.iterate do
+			if leveltime < starttime and p.rings <= 0 then
+				-- if only instawhipchargelockout was exposed
+				p.defenselockout = 1
+			end
+		end
+
+		local countdown = starttime - leveltime
+		if countdown == 3*TICRATE
+		or countdown == 2*TICRATE
+		or countdown == 1*TICRATE then
+			S_StartSound(nil, sfx_s3ka7)
+		elseif not countdown then
+			S_StartSound(nil, sfx_s3kad)
+		end
+	end
+end)
+
 addHook("MapLoad", do
 	loading = false
 	fuseset = true -- not after loading!
 end)
 
-rawset(_G, "lb_rings_spawn", function(p)
-	-- LB_IsRunning isn't valid yet in MobjSpawn so I have to set this here, bleh
-	-- ...actually, just check for our gametype so this works in replays
+addHook("PlayerSpawn", function(p)
 	if not fuseset and gametype == GT_ONLINETA and cv_ringboxes.value then
 		fuseset = true
 		for mo in mobjs.iterate() do
@@ -99,30 +151,12 @@ rawset(_G, "lb_rings_spawn", function(p)
 			p.mo.angle = faultstart.angle*ANG1
 		end
 		p.onlineta = {
-			curtime = 0,
 			exittimer = 0,
 			finished = false,
-			started = false,
-			starttime = 0,
 		}
 	else
 		p.onlineta = nil
 	end
-end)
-
-rawset(_G, "lb_rings_lap", function(p)
-	local ot = p.onlineta
-	S_StartSound(nil, p.laps == numlaps and sfx_s3k68 or sfx_s221)
-	return ot.curtime
-end)
-
-rawset(_G, "lb_rings_finish", function(p)
-	local ot = p.onlineta
-	S_StopSoundByID(nil, sfx_s3kb3) -- no special stage finish sound
-	S_StartSound(nil, sfx_s3k6a)
-	ot.exittimer = 5*TICRATE/2
-	ot.finished = true
-	return ot.curtime, ot.starttime
 end)
 
 addHook("PlayerThink", function(p)
@@ -198,33 +232,4 @@ addHook("PlayerThink", function(p)
 	if p.cmd.buttons & BT_RESPAWN then
 		COM_BufAddText(p, "retry")
 	end
-end)
-
-addHook("ThinkFrame", function(p)
-	for p in players.iterate do
-		local ot = p.onlineta
-		if not ot then return end
-
-		if p.pflags & PF_HITFINISHLINE and not ot.started then
-			ot.started = true
-			ot.starttime = leveltime
-		end
-		if ot.started and not ot.finished then
-			ot.curtime = $ + 1
-		end
-	end
-end)
-
-hud.add(function(v, p)
-	local ot = p.onlineta
-	if not ot then
-		hud.enable("time")
-		return
-	end
-	hud.disable("time")
-
-	local flags = V_SNAPTORIGHT|V_SNAPTOTOP|V_SLIDEIN
-
-	local time = ot.curtime
-	v.drawKartString(205, 8, string.format("%02d'%02d\"%02d", time/TICRATE/60, time/TICRATE%60, G_TicsToCentiseconds(time)), flags)
 end)

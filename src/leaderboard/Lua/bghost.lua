@@ -919,7 +919,7 @@ local function StopWatching(change)
 			consoleplayer.awayviewmobj = nil
 		end
 	end
-	hud.enable("time")
+	if not RINGS then hud.enable("time") end -- main script handles it in RR
 	hud.enable("textspectator")
 	-- keep the ghostcam
 end
@@ -1419,7 +1419,7 @@ local function RunGhosts()
 			end
 
 			-- race started, fast-forward to starttime
-			if consoleplayer.onlineta.started and r.curtic <= r.starttime and r.paused then
+			if LB_Started() and r.curtic <= r.starttime then
 				r.paused = false
 				while r.curtic < r.starttime do
 					if r.file:empty() then
@@ -1775,6 +1775,11 @@ local ringbox = {
 	[-7] = "K_SBJACK",
 }
 
+local function GhostTimer()
+	return ghostwatching and max(0, ghostwatching.curtic - ghostwatching.starttime)
+end
+rawset(_G, "lb_ghost_timer", GhostTimer)
+
 hud.add(function(v, p)
 	if ghostwatching then
 		local flags = V_ALLOWLOWERCASE|V_SNAPTOTOP
@@ -1785,9 +1790,6 @@ hud.add(function(v, p)
 		local speed = FakeSpeedometer(FixedHypot(ghostwatching.gmomx, ghostwatching.gmomy), ghostwatching.mo.scale)
 		flags = ($ & ~V_SNAPTOTOP) | V_MONOSPACE|V_SNAPTOBOTTOM
 		v.drawString(160, 161, speed, flags|trans, "center")
-
-		local time = max(0, ghostwatching.curtic - ghostwatching.starttime)
-		v.drawKartString(205, RINGS and 8 or 12, string.format("%02d'%02d\"%02d", time/TICRATE/60, time/TICRATE%60, G_TicsToCentiseconds(time)), flags|trans)
 
 		if ghostwatching.drifthilitecolor then
 			local color

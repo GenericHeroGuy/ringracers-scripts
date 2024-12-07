@@ -37,14 +37,10 @@ local GhostStartRecording = lb_ghost_start_recording
 local GhostStopRecording = lb_ghost_stop_recording
 local GhostStartPlaying = lb_ghost_start_playing
 local GhostIsRecording = lb_ghost_is_recording
+local GhostTimer = lb_ghost_timer
 
 -- lbcomms.lua
 local CommsRequestGhosts = lb_request_ghosts
-
--- lb_rr.lua
-local RingsLap = lb_rings_lap
-local RingsFinish = lb_rings_finish
-local RingsSpawn = lb_rings_spawn
 
 -- lb_targets.lua
 local TargetsLeft = lb_targets_left
@@ -247,6 +243,14 @@ rawset(_G, "LB_IsRunning", function()
 	return not disable
 end)
 
+rawset(_G, "LB_Started", function()
+	return leveltime >= (RINGS and StartTime or START_TIME)
+end)
+
+rawset(_G, "LB_StartTime", function()
+	return StartTime
+end)
+
 local MSK_SPEED = 0xF0
 local MSK_WEIGHT = 0xF
 
@@ -311,7 +315,7 @@ local function initLeaderboard(player)
 	end
 	local tol, gt = mapheaderinfo[gamemap].typeoflevel
 	if RINGS then
-		gt = tol & TOL_BATTLE and GT_BATTLE or GT_ONLINETA
+		gt = tol & TOL_BATTLE and GT_LEADERBATTLE or GT_ONLINETA
 	else
 		gt = tol & TOL_MATCH and GT_MATCH or GT_RACE
 	end
@@ -324,8 +328,6 @@ local function initLeaderboard(player)
 	end
 
 	player.afkTime = leveltime
-
-	if RINGS then RingsSpawn(player) end
 
 	if not (player.spectator or disable) then
 		MapRecords = GetMapRecords(gamemap, ST_SEP)
@@ -836,13 +838,13 @@ end, COM_ADMIN)
 addHook("MapLoad", function()
 	TimeFinished = 0
 	splits = {}
-	prevLap = RINGS and 1 or 0
+	prevLap = 0
 	drawState = DS_DEFAULT
 	scrollY = 50 * FRACUNIT
 	scrollAcc = 0
 	FlashTics = 0
 	if RINGS then
-		StartTime = 0
+		StartTime = gametype == GT_ONLINETA and 15*TICRATE or 5*TICRATE + TICRATE/2
 	else
 		StartTime = 6*TICRATE + (3*TICRATE/4)
 	end
@@ -1282,6 +1284,14 @@ local function drawScoreboard(v, player, c)
 
 	cachePatches(v)
 
+	-- fake timer
+	local flags = V_SNAPTORIGHT|V_SNAPTOTOP|V_HUDTRANS|(RINGS and V_SLIDEIN or 0)
+	local time = GhostTimer()
+	if time ~= nil or RINGS then
+		if time == nil then time = max(0, leveltime - StartTime) end
+		v.drawKartString(205, RINGS and 8 or 12, string.format("%02d'%02d\"%02d", time/TICRATE/60, time/TICRATE%60, G_TicsToCentiseconds(time)), flags)
+	end
+
 	if not RINGS and gametype == GT_MATCH then DrawTargets(v, player, c) end
 
 	local gui = cv_gui.value or drawState == DS_BROWSER
@@ -1508,8 +1518,17 @@ COM_AddCommand("save", saveLeaderboard)
 
 local function regLap(player)
 	if player.laps > prevLap and TimeFinished == 0 then
+		local lapzero = not prevLap
 		prevLap = player.laps
-		local time = RINGS and RingsLap(player) or player.realtime
+		local time = leveltime - StartTime
+		if RINGS then
+			if leveltime < StartTime then StartTime = leveltime end
+			if lapzero then return end
+			S_StartSound(nil, player.laps == numlaps and sfx_s3k68 or sfx_s221, player)
+			player.karthud[khud_lapanimation] = 80
+		else
+			time = player.realtime -- TODO is this even necessary?
+		end
 		table.insert(splits, time)
 		showSplit = 5 * TICRATE
 	end
@@ -1517,7 +1536,7 @@ end
 
 local function changeMap()
 	local gt = RINGS and GT_ONLINETA or GT_RACE
-	if mapheaderinfo[nextMap].typeoflevel & (RINGS and TOL_BATTLE or TOL_MATCH) then gt = (RINGS and GT_BATTLE or GT_MATCH) end
+	if mapheaderinfo[nextMap].typeoflevel & (RINGS and TOL_BATTLE or TOL_MATCH) then gt = (RINGS and GT_LEADERBATTLE or GT_MATCH) end
 	COM_BufInsertText(server, ("map %d -g %d"):format(nextMap, gt))
 	nextMap = nil
 end
@@ -1550,6 +1569,7 @@ local function think()
 	if disable then
 		if not minirankings then
 			hud.enable("minirankings")
+			if RINGS then hud.enable("time") end
 			minirankings = true
 		end
 		if cv_antiafk.value and gametype == GT_RACE then
@@ -1601,6 +1621,7 @@ local function think()
 	local gamers = getGamers()
 
 	hud.disable("minirankings")
+	if RINGS then hud.disable("time") end
 	minirankings = false
 
 	if leveltime < START_TIME then
@@ -1662,18 +1683,15 @@ local function think()
 
 	for _, p in ipairs(gamers) do
 		local finished = p.laps >= mapheaderinfo[gamemap].numlaps + (RINGS and 1 or 0)
-		if gametype == (RINGS and GT_BATTLE or GT_MATCH) then
+		if gametype == (RINGS and GT_LEADERBATTLE or GT_MATCH) then
 			finished = TargetsLeft() == 0
-			-- temp workaround
-			if RINGS and finished and not TimeFinished then
-				TimeFinished = leveltime
-				saveTime(p)
-			end
 		end
 		-- must be done before browser control
 		if finished and TimeFinished == 0 then
 			if RINGS then
-				TimeFinished, StartTime = RingsFinish(p)
+				TimeFinished = leveltime - StartTime
+				S_StopSoundByID(nil, sfx_s3kb3) -- no special stage finish sound
+				S_StartSound(nil, sfx_s3k6a)
 			else
 				TimeFinished = p.realtime
 			end
@@ -1804,6 +1822,7 @@ local function netvars(net)
 	clearcheats = net($)
 	BrowserPlayer = net($)
 	preroulette = net($)
+	StartTime = net($)
 end
 addHook("NetVars", netvars)
 
@@ -1823,8 +1842,7 @@ local function DrawMediumString(v, x, y, str)
 end
 
 hud.add(function(v)
-	local ot = consoleplayer.onlineta
-	if not (ot and ot.finished and LB_IsRunning()) then
+	if not LB_IsRunning() and TimeFinished then
 		hud.enable("intermissionmessages") -- = intermissiontally
 		return
 	end
