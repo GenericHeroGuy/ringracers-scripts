@@ -360,6 +360,8 @@ local GS_GETSEVEN = 0x9d -- 7
 local GS_GETJACKPOT = 0x9e -- JACKPOT!
 local GS_SUPERRING = 0x9f -- RR ring award (1 parameter byte)
 local GS_GRAVFLIP = 0xa0 -- gravity flip
+local GS_INSTACHARGE = 0xa1 -- charging instawhip
+local GS_INSTAWHIP = 0xa2 -- using instawhip
 
 local GSB_FASTLINES = 0x40 -- go fast
 
@@ -367,6 +369,7 @@ local tins = table.insert
 local pickupring
 local pickupbox
 local pickupfailsafe -- this name doesn't even make sense but might as well follow the theme
+local pickupwhip
 
 local function WriteGhostTic(ghost, player, x, y, z, angle)
 	local flags = WriteFakeFrame(ghost, player)
@@ -473,13 +476,15 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 	ghost.lastroulette = roulette
 
 	local itemtype, itemamount = translate(player, "itemtype"), translate(player, "itemamount")
-	if not RINGS and gametype == GT_MATCH then
-		if itemtype == KITEM_POGOSPRING and itemamount > ghost.lastamount then
+	if gametype == (RINGS and GT_LEADERBATTLE or GT_MATCH) then
+		local it = RINGS and KITEM_GACHABOM or KITEM_POGOSPRING
+		if itemtype == it and itemamount > ghost.lastamount then
 			tins(specials, GS_GETITEM)
+			ghost.lastamount = $ + 1
 		elseif itemamount < ghost.lastamount then
 			tins(specials, GS_NOITEM)
+			ghost.lastamount = $ - 1
 		end
-		ghost.lastamount = itemamount
 	else
 		local havesneaker = itemtype == KITEM_SNEAKER and itemamount > 0
 		if havesneaker and not ghost.havesneaker then
@@ -565,6 +570,14 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 			tins(specials, GS_FAILSAFEBOOST)
 		end
 
+		local whipping = player.instawhipcharge
+		if whipping and not ghost.lastinstawhip then
+			tins(specials, GS_INSTACHARGE)
+		elseif not whipping and ghost.lastinstawhip then
+			tins(specials, pickupwhip[player] and GS_INSTAWHIP or GS_INSTACHARGE)
+		end
+		ghost.lastinstawhip = whipping
+
 		-- XXX: there is literally no way to tell if the roulette gets cancelled
 	end
 
@@ -600,15 +613,19 @@ if RINGS then
 local maybering
 -- and air failsafes
 local maybefailsafe
+-- and instawhips
+local maybewhip
 local prevfailsafe = {}
 addHook("PreThinkFrame", function()
 	if not LB_IsRunning() then return end
 	maybering = nil
 	maybefailsafe = nil
+	maybewhip = nil
 	pickupring = {}
 	-- and item box pops
 	pickupbox = {}
 	pickupfailsafe = {}
+	pickupwhip = {}
 	for p in players.iterate do
 		prevfailsafe[p] = p.pflags & PF_AIRFAILSAFE
 	end
@@ -619,6 +636,9 @@ end, MT_RING)
 addHook("MobjSpawn", function(mo)
 	maybefailsafe = mo
 end, MT_DRIFTEXPLODE)
+addHook("MobjSpawn", function(mo)
+	maybewhip = mo
+end, MT_INSTAWHIP)
 addHook("PlayerThink", function(p)
 	if not LB_IsRunning() then return end
 	if maybering and maybering.extravalue2 == 1 and maybering.state == S_FASTRING1 then
@@ -627,8 +647,12 @@ addHook("PlayerThink", function(p)
 	if maybefailsafe and maybefailsafe.extravalue1 == 0 and not (p.pflags & PF_AIRFAILSAFE) and prevfailsafe[p] then
 		pickupfailsafe[p] = true
 	end
+	if maybewhip and maybewhip.target == p.mo then
+		pickupwhip[p] = true
+	end
 	maybering = nil
 	maybefailsafe = nil
+	maybewhip = nil
 end)
 
 local function P_IsPickupCheesy(player, type)
@@ -690,6 +714,7 @@ local function StartRecording(player)
 		lastsuperring = 0,
 		lastringboxdelay = 0,
 		lastgravflip = 0,
+		lastinstawhip = 0,
 
 		momlog = { x = 0, y = 0, z = 0, a = 0 },
 		errorx = 0,
@@ -882,6 +907,11 @@ local function StartPlaying(record)
 			nextringaward = 0,
 			fakeawardtimer = 0,
 			gravityflip = false,
+			chargingwhip = false,
+			chargetimer = 0,
+			instawhip = 0,
+			whipmo = false,
+			whipshadow = false,
 		}, { __index = do error("no", 2) end, __newindex = do error("no", 2) end })
 		table.insert(reps, rep)
 		replayers[rep] = true
@@ -1142,6 +1172,7 @@ local booleans = {
 	[GS_DEATH] = "dead",
 	[GS_ACROTRICK] = "acrotrick",
 	[GS_GRAVFLIP] = "gravityflip",
+	[GS_INSTACHARGE] = "chargingwhip",
 }
 
 local function PlayGhostTic(r)
@@ -1197,6 +1228,9 @@ local function PlayGhostTic(r)
 			dust.color = SKINCOLOR_MOSS
 			dust.momz = 8*mapobjectscale
 			dust.scale = 2*mapobjectscale
+		elseif flags == GS_INSTAWHIP then
+			r.chargingwhip = false
+			r.instawhip = 12 -- INSTAWHIP_DURATION
 		elseif flags ~= 0x80 then
 			local var = booleans[flags]
 			r[var] = not $
@@ -1222,6 +1256,7 @@ local function PlayGhostTic(r)
 
 	P_MoveOrigin(r.mo, r.mo.x + r.gmomx, r.mo.y + r.gmomy, r.mo.z + r.gmomz)
 	if RINGS then
+		if r.instawhip then frame = SPR2_FSLR end
 		ghoststate.frame = frame | FF_TRANS40
 		r.mo.state = S_LBGHOST
 	else
@@ -1388,6 +1423,57 @@ local function PlayGhostTic(r)
 				SpawnRing(r, false)
 				r.nextringaward = 0
 				r.ringaward = $ - 1
+			end
+		end
+
+		if r.chargingwhip then
+			r.chargetimer = $ + 1
+			r.mo.lightlevel = r.curtic & 1 and max(-255, r.chargetimer*-4 - 150)
+			if r.chargetimer >= 26 then
+				-- once again i can't be assed to copy paste all the VFX, so just...
+				-- colorize, i guess
+				-- ...i mean LOOK at the mess right below this!
+				r.mo.colorized = true
+			end
+		else
+			r.mo.lightlevel = 0
+			r.chargetimer = 0
+			r.mo.colorized = false
+		end
+
+		if r.instawhip then
+			if r.instawhip == 12 then
+				if r.whipmo then
+					P_RemoveMobj(r.whipmo)
+					P_RemoveMobj(r.whipshadow)
+				end
+				local whip = SpawnLocal(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
+				whip.state = S_INSTAWHIP
+				whip.renderflags = RF_NOSPLATBILLBOARD|RF_FULLBRIGHT
+				r.whipmo = whip
+				local shadow = SpawnLocal(r.mo.x, r.mo.y, r.mo.z, MT_THOK)
+				shadow.state = S_INSTAWHIP
+				shadow.renderflags = RF_NOSPLATBILLBOARD|RF_ABSOLUTELIGHTLEVEL
+				r.whipshadow = shadow
+			end
+			r.instawhip = $ - 1
+			local step = (ANGLE_180-1)/12
+			r.mo.sprzoff = FixedMul(sin(r.instawhip*step), r.mo.scale*16)
+			r.mo.angle = $ + ANG60*r.instawhip
+			for _, mo in ipairs({r.whipmo, r.whipshadow}) do
+				mo.renderflags = $ ^^ RF_DONTDRAW
+				mo.frame = (5 - r.instawhip/2) | ($ & ~FF_FRAMEMASK)
+				mo.scale = r.mo.scale
+				mo.angle = r.mo.angle
+				P_MoveOrigin(mo, r.mo.x, r.mo.y, r.mo.z + r.mo.height/2)
+			end
+			r.whipshadow.z = $ - 20*mapobjectscale
+		else
+			r.mo.sprzoff = 0
+			if r.whipmo then
+				P_RemoveMobj(r.whipmo)
+				P_RemoveMobj(r.whipshadow)
+				r.whipmo = false
 			end
 		end
 	end
@@ -1665,7 +1751,7 @@ addHook("ThinkFrame", function()
 		P_MoveOrigin(ghostcam,
 			r.mo.x - P_ReturnThrustX(camangle, dist) - P_ReturnThrustX(camangle+ANGLE_90, FixedMul(r.angofs, mapobjectscale/128)),
 			r.mo.y - P_ReturnThrustY(camangle, dist) - P_ReturnThrustY(camangle+ANGLE_90, FixedMul(r.angofs, mapobjectscale/128)),
-			r.mo.z + height - (not RINGS and 20*FRACUNIT or 0) + r.mo.height/2
+			r.mo.z + height + (not RINGS and -20*FRACUNIT or r.mo.sprzoff) + r.mo.height/2
 		)
 		ghostcam.angle = camangle
 		consoleplayer.awayviewmobj = ghostcam
