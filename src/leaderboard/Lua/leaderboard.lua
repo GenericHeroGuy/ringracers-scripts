@@ -67,6 +67,7 @@ local ScoreTable
 local BrowserPlayer
 -- rings
 local StartTime = 0
+local musicchanged = false
 
 
 -- Text flash on finish
@@ -315,7 +316,7 @@ local function initLeaderboard(player)
 	end
 	local tol, gt = mapheaderinfo[gamemap].typeoflevel
 	if RINGS then
-		gt = tol & TOL_BATTLE and GT_LEADERBATTLE or GT_ONLINETA
+		gt = tol & TOL_BATTLE and GT_LEADERBATTLE or GT_LEADERBOARD
 	else
 		gt = tol & TOL_MATCH and GT_MATCH or GT_RACE
 	end
@@ -844,7 +845,7 @@ addHook("MapLoad", function()
 	scrollAcc = 0
 	FlashTics = 0
 	if RINGS then
-		StartTime = gametype == GT_ONLINETA and 15*TICRATE or 5*TICRATE + TICRATE/2
+		StartTime = gametype == GT_LEADERBOARD and 15*TICRATE or 5*TICRATE + TICRATE/2
 	else
 		StartTime = 6*TICRATE + (3*TICRATE/4)
 	end
@@ -1535,8 +1536,10 @@ local function regLap(player)
 end
 
 local function changeMap()
-	local gt = RINGS and GT_ONLINETA or GT_RACE
-	if mapheaderinfo[nextMap].typeoflevel & (RINGS and TOL_BATTLE or TOL_MATCH) then gt = (RINGS and GT_LEADERBATTLE or GT_MATCH) end
+	local gt = RINGS and GT_LEADERBOARD or GT_RACE
+	if mapheaderinfo[nextMap].typeoflevel & (RINGS and TOL_BATTLE or TOL_MATCH) then
+		gt = (RINGS and GT_LEADERBATTLE or GT_MATCH)
+	end
 	COM_BufInsertText(server, ("map %d -g %d"):format(nextMap, gt))
 	nextMap = nil
 end
@@ -1748,6 +1751,14 @@ local function think()
 		drawState = DS_SCROLL
 	end
 
+	if RINGS and TimeFinished ~= 0 and leveltime - StartTime - 2*TICRATE == TimeFinished then
+		local oldinttime = CV_FindVar("inttime").value
+		COM_BufInsertText(consoleplayer, "tunes racent")
+		musicchanged = true
+		G_SetCustomExitVars(gamemap)
+		COM_BufInsertText(server, "inttime 1000; exitlevel; wait 2; inttime "..oldinttime)
+	end
+
 	if not replayplayback then
 		local afktime = 0
 		for _, p in ipairs(gamers) do
@@ -1831,6 +1842,16 @@ addHook("NetVars", netvars)
 -- have to cram the end screen prototype in here because
 -- no need to dupe splits
 if not RINGS then return end
+
+local function checkmusic()
+	if musicchanged then
+		COM_BufInsertText(consoleplayer, "tunes -default")
+		musicchanged = false
+	end
+end
+
+addHook("MapChange", checkmusic)
+addHook("GameQuit", checkmusic)
 
 local function DrawMediumString(v, x, y, str)
 	for i = 1, #str do

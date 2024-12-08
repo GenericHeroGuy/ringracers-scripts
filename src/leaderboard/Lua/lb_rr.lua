@@ -6,7 +6,7 @@ local BT_RESPAWN = 1<<6
 
 G_AddGametype({
 	name = "Leaderboard",
-	identifier = "ONLINETA",
+	identifier = "LEADERBOARD",
 	rules = GTR_CIRCUIT|GTR_ENCORE
 	-- skip title card, also mutes lap sound, also hides freeplay for some reason
 	|GTR_SPECIALSTART
@@ -38,26 +38,19 @@ local cv_ringboxes = CV_RegisterVar({
 })
 
 local faultstart
-local musicchanged = false
 local fuseset
-
-local function checkmusic()
-	if musicchanged then
-		COM_BufInsertText(consoleplayer, "tunes -default")
-		musicchanged = false
-	end
-end
 
 -- fault starts change their mapthing type to 0 after being processed
 -- so, sigh... here we go...
 local loading = false
+local oldrings
 addHook("MapChange", do
 	loading = true
 	faultstart = nil
 	fuseset = false
-	checkmusic()
+	oldrings = {}
 end)
-addHook("GameQuit", checkmusic)
+
 addHook("MobjSpawn", function()
 	if not faultstart then
 		for mt in mapthings.iterate do
@@ -70,7 +63,7 @@ addHook("MobjSpawn", function()
 end)
 
 addHook("MobjThinker", function(mo)
-	if gametype == GT_ONLINETA and cv_ringboxes.value then
+	if gametype == GT_LEADERBOARD and cv_ringboxes.value then
 		mo.extravalue1 = 0
 	end
 end, MT_RANDOMITEM)
@@ -97,7 +90,7 @@ addHook("ThinkFrame", function()
 		end
 	end
 
-	if gametype == GT_ONLINETA or gametype == GT_LEADERBATTLE then
+	if gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE then
 		for p in players.iterate do
 			if leveltime < starttime and p.rings <= 0 then
 				-- if only instawhipchargelockout was exposed
@@ -122,7 +115,7 @@ addHook("MapLoad", do
 end)
 
 addHook("PlayerSpawn", function(p)
-	if not fuseset and gametype == GT_ONLINETA and cv_ringboxes.value then
+	if gametype == GT_LEADERBOARD and not fuseset and cv_ringboxes.value then
 		fuseset = true
 		for mo in mobjs.iterate() do
 			if mo.type == MT_RANDOMITEM then
@@ -136,8 +129,9 @@ addHook("PlayerSpawn", function(p)
 		end
 	end
 
-	if gametype == GT_ONLINETA and not p.spectator then
-		p.rings = 20
+	if (gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE) and not p.spectator then
+		oldrings[p] = {}
+		if gametype == GT_LEADERBOARD then p.rings = 20 end
 		if faultstart ~= true then
 			local fx, fy, fz = faultstart.x<<FRACBITS, faultstart.y<<FRACBITS, faultstart.z<<FRACBITS
 			local sec = R_PointInSubsector(fx, fy).sector
@@ -150,32 +144,27 @@ addHook("PlayerSpawn", function(p)
 			P_SetOrigin(p.mo, fx, fy, P_FloorzAtPos(fx, fy, floorz + fz, 0))
 			p.mo.angle = faultstart.angle*ANG1
 		end
-		p.onlineta = {
-			exittimer = 0,
-			finished = false,
-		}
-	else
-		p.onlineta = nil
+	end
+end)
+
+addHook("PreThinkFrame", function()
+	for p in players.iterate do
+		local old = oldrings[p]
+		if old then
+			old.delay = p.ringboxdelay
+			old.award = p.ringboxaward
+			old.super = p.superring
+		end
 	end
 end)
 
 addHook("PlayerThink", function(p)
-	local ot = p.onlineta
-	if not ot then return end
+	if p.spectator or not LB_IsRunning() then return end
 
-	if ot.finished then
-		ot.exittimer = $ - 1
-		if not ot.exittimer then
-			local oldinttime = CV_FindVar("inttime").value
-			COM_BufInsertText(consoleplayer, "tunes racent")
-			musicchanged = true
-			COM_BufInsertText(server, "inttime 1000; exitlevel; wait 2; inttime "..oldinttime)
-		end
-	end
-
+	local old = oldrings[p]
 	if cv_ringboxes.value == 2 -- TA mode ringboxes
-	and p.ringboxdelay == 0 and ot.lastringboxdelay == 1 then
-		local award = 5*ot.lastringboxaward + 10
+	and p.ringboxdelay == 0 and old.delay == 1 then
+		local award = 5*old.award + 10
 		if not CV_FindVar("thunderdome").value then
 			award = 3 * award / 2
 		end
@@ -210,23 +199,20 @@ addHook("PlayerThink", function(p)
 		-- THEN K_KartPlayerThink runs, which adds the ringboost and decrements superring
 		-- but we're running after all that so a single ring has already been given to the player
 		-- ...love how I just randomly wrote a long comment for a single - 1 kek
-		local superring = ot.lastsuperring + award - 1
+		local superring = old.super + award - 1
 
 		/* check if not overflow */
-		if superring > ot.lastsuperring then
+		if superring > old.super then
 			p.superring = superring
 		end
 	end
-	ot.lastringboxdelay = p.ringboxdelay
-	ot.lastsuperring = p.superring
-	ot.lastringboxaward = p.ringboxaward
 
 	-- roulette isn't exposed, and item capsules besides rings are disabled in TA, so...
-	if p.itemtype and p.itemtype ~= KITEM_SNEAKER then
-		p.itemtype = KITEM_SNEAKER
-	end
-	if p.itemamount and p.itemamount ~= 1 then
-		p.itemamount = 1
+	if not (gametyperules & GTR_PRISONS) then
+		if p.itemtype and p.itemtype ~= KITEM_SNEAKER then
+			p.itemtype = KITEM_SNEAKER
+			p.itemamount = 1
+		end
 	end
 
 	if p.cmd.buttons & BT_RESPAWN then
