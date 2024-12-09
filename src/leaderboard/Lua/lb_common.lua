@@ -158,9 +158,10 @@ end)
 -- ...throwdir!? what happened to BT_FORWARD/BT_BACKWARD?
 -- well you might be surprised to learn that throwdir exists in both games :^)
 -- so it's the least troublesome way to get up/down inputs
+-- ^^^ i'm starting to doubt this ^^^
 rawset(_G, "lb_throw_dir", function(p)
 	if RINGS then
-		return p.throwdir
+		return max(-1, min(p.cmd.throwdir, 1))
 	else
 		return p.spectator and max(-1, min(p.cmd.forwardmove, 1)) or p.kartstuff[k_throwdir]
 	end

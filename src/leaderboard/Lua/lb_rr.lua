@@ -219,3 +219,15 @@ addHook("PlayerThink", function(p)
 		COM_BufAddText(p, "retry")
 	end
 end)
+
+addHook("IntermissionThinker", function()
+	if not LB_IsRunning() then return end
+
+	for p in players.iterate do
+		if p.spectator then continue end
+		p.exiting = 0 -- don't use bot ticcmds in intermission!
+		if p.cmd.buttons & BT_RESPAWN then
+			COM_BufAddText(p, "retry")
+		end
+	end
+end)

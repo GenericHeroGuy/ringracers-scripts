@@ -68,6 +68,7 @@ local BrowserPlayer
 -- rings
 local StartTime = 0
 local musicchanged = false
+local hudtime = 0
 
 
 -- Text flash on finish
@@ -369,6 +370,8 @@ end)
 
 COM_AddCommand("levelselect", function(player)
 	if not doyoudare(player) then return end
+
+	if RINGS and gamestate ~= GS_LEVEL then return end
 
 	if not InitBrowser then
 		print("Browser is not loaded")
@@ -918,7 +921,7 @@ local modePatches = {
 
 local function modePatch(flag)
 	if flag == F_SPBEXP then
-		return PATCH[modePatches[flag]][(leveltime / 3) % 6]
+		return PATCH[modePatches[flag]][(hudtime / 3) % 6]
 	end
 	return PATCH[modePatches[flag]]
 end
@@ -935,11 +938,11 @@ local function marquee(text, maxwidth)
 	local shift = 16
 
 	-- Creates an index range ranging from -shift to #text + shift
-	local pos = ((leveltime / 16) % (#text - maxwidth + shift * 2)) + 1 - shift
+	local pos = ((hudtime / 16) % (#text - maxwidth + shift * 2)) + 1 - shift
 
 	local cursor = ""
 	if pos < #text - maxwidth + 1 then
-		cursor = cursors[((leveltime / 11) % #cursors) + 1]
+		cursor = cursors[((hudtime / 11) % #cursors) + 1]
 	end
 
 	-- The pos is the index going from -shift to #text + shift
@@ -964,7 +967,6 @@ local splitSymbol = {
 }
 
 local showSplit = 0
-local VFLAGS = V_SNAPTOLEFT
 local FACERANK_DIM = 16
 local FACERANK_SPC = FACERANK_DIM + 4
 
@@ -975,10 +977,11 @@ local function scaleHud(value)
 end
 
 local function drawScore(v, player, pos, x, y, gui, score, drawPos)
+	local VFLAGS = (not RINGS or gamestate == GS_LEVEL) and V_SNAPTOLEFT or 0
 	local trans = V_HUDTRANS
 	local halftrans = drawPos and V_HUDTRANS or V_HUDTRANSHALF
 	if RINGS then
-		if player.exiting then
+		if player.exiting or gamestate ~= GS_LEVEL then
 			trans = 0
 			halftrans = $ == V_HUDTRANSHALF and V_50TRANS or 0
 		else
@@ -1004,11 +1007,11 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos)
 		v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale/scale, faceRank, trans | VFLAGS, v.getColormap(TC_DEFAULT, color))
 
 		if player.name == p.name then
-			v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale, PATCH["CHILI"][(leveltime / 4) % 8], trans | VFLAGS)
+			v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale, PATCH["CHILI"][(hudtime / 4) % 8], trans | VFLAGS)
 		end
 
 		-- draw a tiny little dot so you know which player's name is being shown
-		if #score.players > 1 and (leveltime / (TICRATE*5) % #score.players) + 1 == i then
+		if #score.players > 1 and (hudtime / (TICRATE*5) % #score.players) + 1 == i then
 			v.drawFill(x, y, 1, 1, 128)
 		end
 
@@ -1050,7 +1053,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos)
 	if score["flags"] & F_ENCORE then
 		local ruby_scale = scaleHud(FRACUNIT/6)
 
-		local bob = sin((leveltime + i * 5) * (ANG10))
+		local bob = sin((hudtime + i * 5) * (ANG10))
 		v.drawScaled(
 			x * FRACUNIT,
 			bob + (y + frdim/2) << FRACBITS,
@@ -1105,7 +1108,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos)
 	end
 
 	if gui == GUI_ON or (gui == GUI_SPLITS and showSplit) then
-		local name = score.players[(leveltime / (TICRATE*5) % #score.players) + 1].name
+		local name = score.players[(hudtime / (TICRATE*5) % #score.players) + 1].name
 
 		-- Shorten long names
 		local stralign = "left"
@@ -1139,8 +1142,8 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos)
 				break
 			end
 		end
-		if me and FlashTics > leveltime then
-			flashV = FlashVFlags[leveltime / FlashRate % (#FlashVFlags + 1)]
+		if me and FlashTics > hudtime then
+			flashV = FlashVFlags[hudtime / FlashRate % (#FlashVFlags + 1)]
 		end
 
 		v.drawString(
@@ -1281,25 +1284,31 @@ end
 
 local function drawScoreboard(v, player, c)
 	if disable then return end
-	if player != displayplayers[0] then return end
 
 	cachePatches(v)
 
-	-- fake timer
-	local flags = V_SNAPTORIGHT|V_SNAPTOTOP|V_HUDTRANS|(RINGS and V_SLIDEIN or 0)
-	local time = GhostTimer()
-	if time ~= nil or RINGS then
-		if time == nil then time = max(0, leveltime - StartTime) end
-		v.drawKartString(205, RINGS and 8 or 12, string.format("%02d'%02d\"%02d", time/TICRATE/60, time/TICRATE%60, G_TicsToCentiseconds(time)), flags)
-	end
-
-	if not RINGS and gametype == GT_MATCH then DrawTargets(v, player, c) end
-
 	local gui = cv_gui.value or drawState == DS_BROWSER
 
-	-- Force enable gui at start and end of the race
-	if leveltime < START_TIME or player.exiting or player.lives == 0 then
-		gui = GUI_ON
+	if not RINGS or gamestate == GS_LEVEL then
+		if c.pnum - 1 ~= splitscreen then return end
+
+		-- fake timer
+		local flags = V_SNAPTORIGHT|V_SNAPTOTOP|V_HUDTRANS|(RINGS and V_SLIDEIN or 0)
+		local time = GhostTimer()
+		if time ~= nil or RINGS then
+			if time == nil then time = max(0, leveltime - StartTime) end
+			v.drawKartString(205, RINGS and 8 or 12, string.format("%02d'%02d\"%02d", time/TICRATE/60, time/TICRATE%60, G_TicsToCentiseconds(time)), flags)
+		end
+
+		if not RINGS and gametype == GT_MATCH then DrawTargets(v, player, c) end
+
+		-- Force enable gui at start and end of the race
+		if leveltime < START_TIME or player.exiting or player.lives == 0 then
+			gui = GUI_ON
+		end
+	else
+		if not TimeFinished then return end -- no intermission scrolling if you didn't finish
+		player = getGamers()[1]
 	end
 
 	if gui then
@@ -1563,6 +1572,23 @@ end
 
 local minirankings = true
 
+local function scrollThink()
+	-- TODO nice port priority
+	local gamer = getGamers()[1]
+
+	local dir = getThrowDir(gamer)
+	if dir == -1 then -- BT_BACKWARD
+		scrollAcc = scrollAcc - FRACUNIT / 3
+	elseif dir == 1 then -- BT_FORWARD
+		scrollAcc = scrollAcc + FRACUNIT / 3
+	else
+		scrollAcc = FixedMul(scrollAcc, (FRACUNIT * 90) / 100)
+		if scrollAcc < FRACUNIT and scrollAcc > -FRACUNIT then
+			scrollAcc = 0
+		end
+	end
+end
+
 local function think()
 	if nextMap then changeMap() end
 
@@ -1615,6 +1641,7 @@ local function think()
 		return
 	end
 
+	hudtime = leveltime
 	showSplit = max(0, showSplit - 1)
 
 	if not cv_teamchange then
@@ -1711,18 +1738,7 @@ local function think()
 	-- Scroll controller
 	-- Spectators can't input buttons so let the gamer do it
 	if drawState == DS_SCROLL then
-		-- TODO nice port priority
-		local dir = getThrowDir(gamers[1])
-		if dir == -1 then -- BT_BACKWARD
-			scrollAcc = scrollAcc - FRACUNIT / 3
-		elseif dir == 1 then -- BT_FORWARD
-			scrollAcc = scrollAcc + FRACUNIT / 3
-		else
-			scrollAcc = FixedMul(scrollAcc, (FRACUNIT * 90) / 100)
-			if scrollAcc < FRACUNIT and scrollAcc > -FRACUNIT then
-				scrollAcc = 0
-			end
-		end
+		scrollThink()
 	elseif drawState == DS_BROWSER then
 		if BrowserController(BrowserPlayer) then
 			drawState = DS_DEFAULT
@@ -1756,7 +1772,7 @@ local function think()
 		COM_BufInsertText(consoleplayer, "tunes racent")
 		musicchanged = true
 		G_SetCustomExitVars(gamemap)
-		COM_BufInsertText(server, "inttime 1000; exitlevel; wait 2; inttime "..oldinttime)
+		COM_BufInsertText(server, "inttime 15; exitlevel; wait 2; inttime "..oldinttime)
 	end
 
 	if not replayplayback then
@@ -1839,8 +1855,7 @@ addHook("NetVars", netvars)
 
 ------------------------------------------------------------
 
--- have to cram the end screen prototype in here because
--- no need to dupe splits
+-- RR intermission screen
 if not RINGS then return end
 
 local function checkmusic()
@@ -1862,19 +1877,87 @@ local function DrawMediumString(v, x, y, str)
 	end
 end
 
+-- these bespoke font drawers just keep getting weirder...
+local function DrawTitleHighString(v, x, y, string, flags)
+	local font = "THIFN%03d"
+	for _, c in ipairs({string:upper():byte(1, -1)}) do
+		if c == 32 then x = x + 10; continue end
+		local p = v.cachePatch(font:format(c))
+		v.draw(x, y, p, flags)
+		x = x + p.width - 4
+	end
+end
+
+local function DrawTitleLowString(v, x, y, string, flags)
+	local font = "TLWFN%03d"
+	for _, c in ipairs({string:upper():byte(1, -1)}) do
+		if c == 32 then x = x + 10; continue end
+		local p = v.cachePatch(font:format(c))
+		v.draw(x, y, p, flags)
+		x = x + p.width - 4
+	end
+end
+
+local function TitleLowStringWidth(v, string, flags)
+	local font = "TLWFN%03d"
+	local x = 4
+	for _, c in ipairs({string:upper():byte(1, -1)}) do
+		if c == 32 then x = x + 10; continue end
+		local p = v.cachePatch(font:format(c))
+		x = x + p.width - 4
+	end
+	return x
+end
+
+local function M_DrawHighLowLevelTitle(v, x, y, map)
+	local header = mapheaderinfo[map]
+	if not header or header.menuttl == "" and header.lvlttl == "" then return end
+
+	local word1, word2 = "", ""
+	if header.menuttl == "" and header.zonttl ~= "" then
+		word1, word2 = header.lvlttl, header.zonttl
+	else
+		local ttlsource = header.menuttl ~= "" and header.menuttl or header.lvlttl
+
+		// If there are 2 or more words:
+		// - Last word goes on word2
+		// - Everything else on word1
+		local p = ttlsource:reverse():find(" ")
+		if p ~= nil then p = #ttlsource - p + 1 end
+		word1 = ttlsource:sub(1, p or -1)
+		word2 = ttlsource:sub(p or INT32_MAX, -1)
+	end
+
+	if header.menuttl == "" and header.actnum then
+		word2 = $.." "..header.actnum
+	end
+
+	DrawTitleHighString(v, x, y, word1, 0)
+	DrawTitleLowString(v, x + TitleLowStringWidth(v, word1:sub(1, 2), 0), y+28, word2, 0)
+end
+
+addHook("IntermissionThinker", function()
+	if TimeFinished then
+		hudtime = $ + 1
+		if drawState == DS_SCROLL then
+			scrollThink()
+		elseif drawState == DS_BROWSER then
+			drawState = DS_SCROLL
+		end
+	end
+end)
+
 hud.add(function(v)
-	if not LB_IsRunning() and TimeFinished then
+	if not (LB_IsRunning() and TimeFinished) then
 		hud.enable("intermissionmessages") -- = intermissiontally
 		return
 	end
 	hud.disable("intermissionmessages") -- = intermissiontally
 
-	S_ShowMusicCredit() -- to hide it, ironically
-
 	--[[
 	v.fadeScreen(135, 10)
 	local dup = v.dupx()
-	local t = (time*dup)/2
+	local t = (hudtime*dup)/2
 	local t2 = 32*dup
 	local xofs = (v.width() - 320*dup)/2
 	local yofs = (v.height() - 200*dup)/2
@@ -1885,13 +1968,34 @@ hud.add(function(v)
 	end
 	--]]
 
+	local patchName = G_BuildMapName(gamemap).."P"
+	local mapp = v.patchExists(patchName) and v.cachePatch(patchName) or v.cachePatch("BLANKLVL")
+
+	v.drawScaled(9*FRACUNIT, 8*FRACUNIT, FRACUNIT/4, mapp)
+	M_DrawHighLowLevelTitle(v, 98, 10, gamemap)
+
+	local gamer = getGamers()[1]
+	local skin, color = gamer.skin, gamer.skincolor
+	local sprite, flip = v.getSprite2Patch(skin, SPR2_STIL, 0, 8)
+	v.draw(140, 140, sprite, flip and V_FLIP or 0, v.getColormap(skin, color))
+
 	local laptimes = {}
-	for i = 1, #splits do
-		laptimes[i] = splits[i] - (splits[i-1] or 0)
+	if next(splits) then
+		for i = 1, #splits do
+			laptimes[i] = splits[i] - (splits[i-1] or 0)
+		end
+		table.insert(laptimes, TimeFinished - splits[#splits])
 	end
-	table.insert(laptimes, TimeFinished - splits[#splits])
+
+	local x, y = 190, 100 - #laptimes*6
 
 	for i, time in ipairs(laptimes) do
-		DrawMediumString(v, 160, 32 + i*12, string.format("%02d\"%02d", time/TICRATE, G_TicsToCentiseconds(time)))
+		local str = ("%02d'%02d\"%02d"):format(time/TICRATE/60, time/TICRATE%60, G_TicsToCentiseconds(time))
+		v.draw(x, y + i*12, v.cachePatch("K_SPTLAP"))
+		v.drawString(x + 13, y + 1 + i*12, i)
+		DrawMediumString(v, x + 26, y + i*12, str)
 	end
+	v.drawKartString(x, y + 12 + #laptimes*12, ("%02d'%02d\"%02d"):format(TimeFinished/TICRATE/60, TimeFinished/TICRATE%60, G_TicsToCentiseconds(TimeFinished)))
 end, "intermission")
+
+hud.add(drawScoreboard, "intermission")
