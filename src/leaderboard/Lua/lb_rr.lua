@@ -159,7 +159,8 @@ addHook("PreThinkFrame", function()
 end)
 
 addHook("PlayerThink", function(p)
-	if p.spectator or not LB_IsRunning() then return end
+	-- do NOT check LB_IsRunning so this works in replays
+	if p.spectator or not (gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE) then return end
 
 	local old = oldrings[p]
 	if cv_ringboxes.value == 2 -- TA mode ringboxes
