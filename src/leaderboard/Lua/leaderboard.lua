@@ -321,12 +321,18 @@ local function initLeaderboard(player)
 	else
 		gt = tol & TOL_MATCH and GT_MATCH or GT_RACE
 	end
+	local gtdisable = disable or not cv_enable.value
 	disable = $ or not cv_enable.value or gametype ~= gt
 
 	-- Restore encore mode to initial value
 	if disable and EncoreInitial != nil then
 		COM_BufInsertText(server, string.format(RINGS and "encore %d" or "kartencore %d", EncoreInitial))
 		EncoreInitial = nil
+	end
+
+	-- if disabled by gametype, restart with the correct gametype
+	if RINGS and not gtdisable and not (gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE) then
+		nextMap = gamemap
 	end
 
 	player.afkTime = leveltime
@@ -1600,6 +1606,11 @@ local function think()
 			hud.enable("minirankings")
 			if RINGS then hud.enable("time") end
 			minirankings = true
+		end
+		-- don't use our broken gametypes in normal races!
+		if RINGS and (gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE) then
+			local gt = mapheaderinfo[gamemap].typeoflevel & TOL_BATTLE and GT_BATTLE or GT_RACE
+			COM_BufInsertText(server, ("map %d -g %d -f"):format(gamemap, gt))
 		end
 		if cv_antiafk.value and gametype == GT_RACE then
 			if not singleplayer() then
