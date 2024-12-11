@@ -536,55 +536,45 @@ COM_AddCommand("records", function(player, mapid)
 end, COM_LOCAL)
 
 COM_AddCommand("changelevel", function(player, ...)
-	if not doyoudare(player) then
-		return
-	end
-	if leveltime < 20 then
+	if not doyoudare(player) or leveltime < 20 then
 		return
 	end
 
-	local search = ...
-	local map, lvlttl
-
-	if search == nil then
-		CONS_Printf(player, "Usage: changelevel MAPXX or Map Name")
+	local search = table.concat({...}, " ")
+	if search == "" then
+		CONS_Printf(player, ("Usage: changelevel %s or Map Name")
+		                    :format(RINGS and "RR_XYZ" or "MAPXX"))
+		                    -- look at this hipster syntax!
 		return
 	end
 
-	if not string.find(search:lower(), "map") then --don´t need to search stuff if someone uses MAPXX with this
+	local mapnum = tonumber(search)
+	if mapnum ~= nil then
+		-- based numeric ID user
+	elseif not RINGS and search:lower():sub(1, 3) ~= "map" then --don´t need to search stuff if someone uses MAPXX with this
 		for i = 1, #mapheaderinfo do
-			map = mapheaderinfo[i]
-			if map == nil then
-				continue
-			end
+			local map = mapheaderinfo[i]
+			if not map then continue end
 
-			lvlttl = map.lvlttl + zoneAct(map)
+			local lvlttl = map.lvlttl..zoneAct(map)
 
 			if lvlttl:lower():find(search:lower()) then
-				map = G_BuildMapName(i)
-				if map ~= nil then --found our map so bail outta the lööp
-					break
-				end
+				mapnum = i
+				break
 			end
 		end
-
-		if map == nil then
-			CONS_Printf(player, string.format("Map doesn't exist: %s", search))
-			return
-		end
+	else
+		-- check map title AND lumpname in RR
+		mapnum = RINGS and G_FindMap(search) or mapnumFromExtended(search)
 	end
 
-	if map == nil then
-		map = ...
-	end
-
-	local mapnum = mapnumFromExtended(map)
-	if not mapnum then
-		CONS_Printf(player, string.format("Invalid map name: %s", map))
+	if not mapnum or mapnum < 1 then
+		CONS_Printf(player, ("Invalid map name: %s"):format(search))
+		return
 	end
 
 	if mapheaderinfo[mapnum] == nil then
-		CONS_Printf(player, string.format("Map doesn't exist: %s", map:upper()))
+		CONS_Printf(player, ("Map doesn't exist: %s"):format(search))
 		return
 	end
 
