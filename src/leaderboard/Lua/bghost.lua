@@ -362,6 +362,7 @@ local GS_SUPERRING = 0x9f -- RR ring award (1 parameter byte)
 local GS_GRAVFLIP = 0xa0 -- gravity flip
 local GS_INSTACHARGE = 0xa1 -- charging instawhip
 local GS_INSTAWHIP = 0xa2 -- using instawhip
+local GS_AUTORING = 0xa3 -- save bytes by not adding a special for every ring
 
 local GSB_FASTLINES = 0x40 -- go fast
 
@@ -513,7 +514,24 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 	if RINGS then
 		local usedring = pickupring[player]
 		if usedring then
-			tins(specials, GS_USERING)
+			if ghost.lastusering == leveltime - 3 then -- chugging rings?
+				if ghost.chugging then
+					-- yay, no special needed!
+				else
+					-- replace the last USERING with AUTORING
+					ghost.data = ghost.data:sub(1, ghost.useringpos-1)..string.char(GS_AUTORING)..ghost.data:sub(ghost.useringpos+1, -1)
+					ghost.chugging = true
+				end
+				ghost.lastusering = leveltime
+			else
+				tins(specials, GS_USERING) -- cancels autoring
+				ghost.chugging = false
+				ghost.lastusering = leveltime
+				ghost.useringpos = #ghost.data + #specials
+			end
+		elseif ghost.chugging and ghost.lastusering == leveltime - 3 then
+			tins(specials, GS_AUTORING)
+			ghost.chugging = false
 		end
 
 		local spindash = player.spindash
@@ -560,7 +578,7 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 				print("That's a lot of rings! How am I supposed to fit that in just a byte???")
 			else
 				tins(specials, GS_SUPERRING)
-				tins(specials, superring)
+				tins(specials, superring + 1)
 			end
 		end
 		ghost.lastsuperring = superring
@@ -609,8 +627,8 @@ local function WriteGhostTic(ghost, player, x, y, z, angle)
 end
 
 if RINGS then
--- oh boy, gotta detect ring usage
-local maybering
+-- oh boy, gotta detect ring usage(s, because turns out superrings and userings can happen at the same time)
+local mayberings
 -- and air failsafes
 local maybefailsafe
 -- and instawhips
@@ -618,7 +636,7 @@ local maybewhip
 local prevfailsafe = {}
 addHook("PreThinkFrame", function()
 	if not LB_IsRunning() then return end
-	maybering = nil
+	mayberings = {}
 	maybefailsafe = nil
 	maybewhip = nil
 	pickupring = {}
@@ -631,7 +649,7 @@ addHook("PreThinkFrame", function()
 	end
 end)
 addHook("MobjSpawn", function(mo)
-	maybering = mo
+	if mayberings then tins(mayberings, mo) end
 end, MT_RING)
 addHook("MobjSpawn", function(mo)
 	maybefailsafe = mo
@@ -641,8 +659,11 @@ addHook("MobjSpawn", function(mo)
 end, MT_INSTAWHIP)
 addHook("PlayerThink", function(p)
 	if not LB_IsRunning() then return end
-	if maybering and maybering.extravalue2 == 1 and maybering.state == S_FASTRING1 then
-		pickupring[p] = true
+	for _, mo in ipairs(mayberings) do
+		if mo.extravalue2 == 1 and mo.state == S_FASTRING1 then
+			pickupring[p] = true
+			break
+		end
 	end
 	if maybefailsafe and maybefailsafe.extravalue1 == 0 and not (p.pflags & PF_AIRFAILSAFE) and prevfailsafe[p] then
 		pickupfailsafe[p] = true
@@ -650,7 +671,7 @@ addHook("PlayerThink", function(p)
 	if maybewhip and maybewhip.target == p.mo then
 		pickupwhip[p] = true
 	end
-	maybering = nil
+	mayberings = {}
 	maybefailsafe = nil
 	maybewhip = nil
 end)
@@ -715,6 +736,9 @@ local function StartRecording(player)
 		lastringboxdelay = 0,
 		lastgravflip = 0,
 		lastinstawhip = 0,
+		lastusering = -3,
+		chugging = false,
+		useringpos = false,
 
 		momlog = { x = 0, y = 0, z = 0, a = 0 },
 		errorx = 0,
@@ -912,6 +936,8 @@ local function StartPlaying(record)
 			instawhip = 0,
 			whipmo = false,
 			whipshadow = false,
+			autoring = false,
+			autoringrate = 0,
 		}, { __index = do error("no", 2) end, __newindex = do error("no", 2) end })
 		table.insert(reps, rep)
 		replayers[rep] = true
@@ -1173,6 +1199,7 @@ local booleans = {
 	[GS_ACROTRICK] = "acrotrick",
 	[GS_GRAVFLIP] = "gravityflip",
 	[GS_INSTACHARGE] = "chargingwhip",
+	[GS_AUTORING] = "autoring",
 }
 
 local function PlayGhostTic(r)
@@ -1209,6 +1236,7 @@ local function PlayGhostTic(r)
 			end
 		elseif flags == GS_USERING then
 			SpawnRing(r, true)
+			r.autoring = false
 		elseif flags >= GS_NOITEM and flags <= GS_GETITEM then
 			if flags == GS_GETITEM and r.hasitem >= 2 then
 				r.hasitem = $ + 1
@@ -1475,6 +1503,17 @@ local function PlayGhostTic(r)
 				P_RemoveMobj(r.whipshadow)
 				r.whipmo = false
 			end
+		end
+
+		if r.autoring then
+			if not r.autoringrate then
+				SpawnRing(r, true)
+				r.autoringrate = 3-1
+			else
+				r.autoringrate = $ - 1
+			end
+		else
+			r.autoringrate = 0
 		end
 	end
 
