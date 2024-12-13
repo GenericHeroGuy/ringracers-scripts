@@ -17,6 +17,7 @@ local getThrowDir = lb_throw_dir
 local ghost_t = lb_ghost_t
 local mapNameAndSum = lb_mapname_and_checksum
 local getPortrait = lb_get_portrait
+local isSameRecord = lb_is_same_record
 
 -- browser.lua
 local InitBrowser = InitBrowser
@@ -31,6 +32,12 @@ local MoveRecords = lb_move_records
 local WriteGhost = lb_write_ghost
 local RecordByID = lb_rec_by_id
 local IDsForMap = lb_ids_for_map
+local GetProfile = lb_get_profile
+local NewProfile = lb_new_profile
+local GetAlias = lb_get_alias
+local NewAlias = lb_new_alias
+local RecordName = lb_record_name
+local ProfileKey = lb_profile_key
 
 -- bghost.lua
 local GhostStartRecording = lb_ghost_start_recording
@@ -514,21 +521,24 @@ COM_AddCommand("records", function(player, mapid)
 		-- don't print flags for time attack
 		for i, score in ipairs(records) do
 			local names = {}
+			local ids = {}
 			for _, p in ipairs(score.players) do
-				table.insert(names, (SG_Color2Chat and SG_Color2Chat[p.color] or "")..p.name)
+				table.insert(names, (SG_Color2Chat and SG_Color2Chat[p.color] or "")..RecordName(p))
+				table.insert(ids, ProfileKey(p))
 			end
 			print(string.format(
-				(admin and "[%5d] " or "%s").."%2d %-21s \x89%s"..(mode and " \x80%s" or ""),
+				(admin and "[%5d] " or "%s").."%2d %-21s \x89%s\x80"..(mode and " %s" or "").." %s",
 				admin and score.id or "",
 				i,
 				names[1],
 				ticsToTime(score["time"]),
-				mode and modeToString(score["flags"]) or nil
+				mode and modeToString(score["flags"]) or ids[1]:sub(1, 16),
+				ids[1]:sub(1, 16)
 			))
 			for i = 2, #names do
 				print(string.format(
-					(admin and "        " or "").."   & %s",
-					names[i]
+					(admin and "        " or "").."   & %s %s",
+					names[i], ids[i]:sub(1, 16)
 				))
 			end
 		end
@@ -635,6 +645,8 @@ COM_AddCommand("rival", function(player, rival, page)
 	local scores = {}
 	local totalScores = 0
 	local totalDiff = 0
+	local mypid = GetProfile(player)
+	local rivalpid = GetProfile({ name = rival })
 
 	print(string.format("\x89%s's times:", rival))
 	print("MAP\tTime\tDiff    \tMode")
@@ -650,9 +662,9 @@ COM_AddCommand("rival", function(player, rival, page)
 
 			for _, score in ipairs(records) do
 				for _, p in ipairs(score.players) do
-					if p.name == player.name then
+					if p.pid == mypid then
 						yourScore = score
-					elseif p.name == rival then
+					elseif p.pid == rivalpid then
 						rivalScore = score
 					end
 					if rivalScore and yourScore then
@@ -997,12 +1009,13 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos)
 	end
 
 	--draw Patch/chili
+	local mypid = GetProfile(player) or false -- don't highlight unclaimed record
 	for i, p in ipairs(score.players) do
 		local faceRank, scale = getPortrait(v, p)
-		local color = p.color < MAXSKINCOLORS and p.color or 0
+		local color = not p.faker and p.color < MAXSKINCOLORS and p.color or 0
 		v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale/scale, faceRank, trans | VFLAGS, v.getColormap(TC_DEFAULT, color))
 
-		if player.name == p.name then
+		if mypid == p.pid then
 			v.drawScaled(x<<FRACBITS, y<<FRACBITS, hudscale, PATCH["CHILI"][(hudtime / 4) % 8], trans | VFLAGS)
 		end
 
@@ -1104,7 +1117,8 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos)
 	end
 
 	if gui == GUI_ON or (gui == GUI_SPLITS and showSplit) then
-		local name = score.players[(hudtime / (TICRATE*5) % #score.players) + 1].name
+		local sp = score.players[(hudtime / (TICRATE*5) % #score.players) + 1]
+		local name = sp.faker and UNCLAIMED or RecordName(sp)
 
 		-- Shorten long names
 		local stralign = "left"
@@ -1133,7 +1147,9 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos)
 		local gamers = getGamers()
 		for i, p in ipairs(gamers) do
 			local sp = score.players[i]
-			if sp and p.name ~= sp.name then
+			local mypid = GetProfile(p)
+			local myalias = mypid and GetAlias(p.name, mypid)
+			if mypid ~= sp.pid or myalias ~= sp.alias then
 				me = false
 				break
 			end
@@ -1187,7 +1203,7 @@ local function drawDefault(v, player, scoreTable, gui)
 
 	-- Draw placeholder score
 	if scoreTable == nil then
-		drawScore(v, player, 1, x, y, gui, {["players"] = { { name = UNCLAIMED, color = 0, faker = true } }, ["time"] = 0, ["flags"] = 0})
+		drawScore(v, player, 1, x, y, gui, {["players"] = { { faker = true } }, ["time"] = 0, ["flags"] = 0})
 	else
 		for pos, score in ipairs(scoreTable) do
 			if pos > 5 then break end
@@ -1350,7 +1366,8 @@ function scroll_to()
 	for pos, score in ipairs(m) do
 		local gotem = true -- the sheer disappointment when i found out "continue 2" doesn't work
 		for i, p in ipairs(gamers) do
-			if p.name ~= score.players[i].name then
+			local mypid = GetProfile(p)
+			if mypid ~= score.players[i].pid then
 				gotem = false
 				break
 			end
@@ -1419,15 +1436,6 @@ local function checkFlags(p)
 	return flags
 end
 
-local function isSameRecord(a, b, modeSep)
-	if (a.flags & modeSep) ~= (b.flags & modeSep)
-	or #a.players ~= #b.players then return false end
-	for i = 1, #a.players do
-		if a.players[i].name ~= b.players[i].name then return false end
-	end
-	return true
-end
-
 local function saveTime(player)
 	-- Disqualify if the flags changed mid trial.
 	if checkFlags(player) != Flags then
@@ -1459,8 +1467,11 @@ local function saveTime(player)
 		if not (appear and appear ~= "default") then
 			appear = ""
 		end
+		local pid = GetProfile(p) or NewProfile(p)
+		local alias = GetAlias(p.name, pid) or NewAlias(p.name, pid)
 		table.insert(players, player_t(
-			p.name,
+			pid,
+			alias,
 			skin,
 			appear,
 			p.skincolor,

@@ -11,9 +11,10 @@ rawset(_G, "lb_score_t", function(flags, time, starttime, splits, players, id)
 	}
 end)
 
-rawset(_G, "lb_player_t", function(name, skin, appear, color, stat)
+rawset(_G, "lb_player_t", function(pid, alias, skin, appear, color, stat)
 	return {
-		["name"]   = name,
+		["pid"]    = pid,
+		["alias"]  = alias,
 		["skin"]   = skin,
 		["appear"] = appear,
 		["color"]  = color,
@@ -25,6 +26,13 @@ rawset(_G, "lb_ghost_t", function(data, startofs)
 	return {
 		["data"]     = data,
 		["startofs"] = startofs,
+	}
+end)
+
+rawset(_G, "lb_profile_t", function(aliases, publickey)
+	return {
+		["aliases"]   = aliases,
+		["publickey"] = publickey,
 	}
 end)
 
@@ -77,6 +85,16 @@ rawset(_G, "lb_comp", function(a, b)
 	-- if s is 0 then compare time
 	local s = (a.flags & (F_SPBEXP | F_SPBBIG)) - (b.flags & (F_SPBEXP | F_SPBBIG))
 	return s > 0 or not(s < 0 or a.time >= b.time)
+end)
+
+rawset(_G, "lb_is_same_record", function(a, b, modeSep)
+	if (a.flags & modeSep) ~= (b.flags & modeSep)
+	or #a.players ~= #b.players then return false end
+	for i = 1, #a.players do
+		local pa, pb = a.players[i], b.players[i]
+		if pa.pid ~= pb.pid or pa.alias ~= pb.alias then return false end
+	end
+	return true
 end)
 
 local function djb2(message)
@@ -260,6 +278,12 @@ local reader = { __index = {
 		self[2] = p
 		return self[1]:sub(p - len, p - 1)
 	end,
+	readpid = function(self)
+		local p = self[2]
+		local lo, hi, alias = self[1]:byte(p, p + 2)
+		self[2] = p + 3
+		return lo | (hi << 8), alias
+	end,
 	empty = function(self)
 		return self[2] > self[3]
 	end,
@@ -315,7 +339,10 @@ local writer = { __index = {
 	end,
 	writeliteral = function(self, str)
 		tins(self, str)
-	end
+	end,
+	writepid = function(self, prof)
+		tins(self, schar(prof.pid & 0xff, prof.pid >> 8, prof.alias))
+	end,
 } }
 
 rawset(_G, "lb_string_writer", function()

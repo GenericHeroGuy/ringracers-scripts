@@ -19,6 +19,8 @@ local getPortrait = lb_get_portrait
 
 -- lb_store.lua
 local GetMapRecords = lb_get_map_records
+local GetProfile = lb_get_profile
+local RecordName = lb_record_name
 
 -----------------------------
 
@@ -407,6 +409,7 @@ local function drawScore(v, i, pos, score, player)
 	local y = scoresY + i * 18
 	local textFlag = colorFlags[pos%2]
 	local ofs = 0
+	local mypid = GetProfile(player)
 
 	-- position
 	drawNum(v, column[1], y, pos)
@@ -418,7 +421,7 @@ local function drawScore(v, i, pos, score, player)
 		v.drawScaled((column[1] + ofs)<<FRACBITS, y<<FRACBITS, FRACUNIT/downscale, facerank, 0, v.getColormap(TC_DEFAULT, color))
 
 		-- chili
-		if player.name == p.name then
+		if mypid == p.pid then
 			local chilip = v.cachePatch("K_CHILI"..leveltime/4%8+1)
 			v.draw(column[1], y, chilip)
 			textFlag = V_YELLOWMAP
@@ -435,7 +438,8 @@ local function drawScore(v, i, pos, score, player)
 	end
 
 	-- name
-	v.drawString(column[2] + ofs, y, score.players[(leveltime / (TICRATE*5) % #score.players) + 1].name, V_ALLOWLOWERCASE | textFlag)
+	local sp = score.players[(leveltime / (TICRATE*5) % #score.players) + 1]
+	v.drawString(column[2] + ofs, y, RecordName(sp), V_ALLOWLOWERCASE | textFlag)
 	-- time
 	v.drawString(column[3], y, TicsToTime(score["time"]), textFlag)
 	-- flags

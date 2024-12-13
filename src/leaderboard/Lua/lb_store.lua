@@ -13,14 +13,18 @@ local ticsToTime = lb_TicsToTime
 local StringReader = lb_string_reader
 local StringWriter = lb_string_writer
 local ghost_t = lb_ghost_t
+local profile_t = lb_profile_t
+local isSameRecord = lb_is_same_record
 
 ----------------------------
 
 local RINGS = VERSION == 2
 local open = RINGS and function(path, mode) return io.openlocal("client/"..path, mode) end or io.open
 
-local LEADERBOARD_VERSION = 2
+local LEADERBOARD_VERSION = 3
 local GHOST_VERSION = 1
+local MAXPROFILES = 65536
+local MAXALIASES = 256
 
 local OLD_STARTTIME = 6*TICRATE + (3*TICRATE/4) -- starttime for version 1 records
 
@@ -54,14 +58,11 @@ local NextID
 -- which records are waiting to be written to the coldstore
 local Dirty
 
-local function isSameRecord(a, b, modeSep)
-	if (a.flags & modeSep) ~= (b.flags & modeSep)
-	or #a.players ~= #b.players then return false end
-	for i = 1, #a.players do
-		if a.players[i].name ~= b.players[i].name then return false end
-	end
-	return true
-end
+-- player profiles
+local Profiles
+
+-- dirty player profiles :flushed:
+local DirtyProfs
 
 -- insert or replace the score in dest
 -- returns true if inserted, false if (maybe) replaced
@@ -134,7 +135,7 @@ local function writeRecord(f, record)
 	end
 	f:write8(#record.players)
 	for _, p in ipairs(record.players) do
-		f:writestr(p.name)
+		f:writepid(p)
 		f:writestr(p.skin)
 		f:writestr(p.appear)
 		f:write8(p.color)
@@ -162,6 +163,24 @@ local function writeMapStore(f, store)
 				writeRecord(f, record)
 			end
 		end
+	end
+end
+
+-- why do a gsub function call for every pair of digits when you can make a lookup table?
+local hex2char = {}
+for i = 0, 255 do
+	hex2char[("%02X"):format(i)] = string.char(i)
+end
+
+local function writeProfiles(f, profiles, cold)
+	writeCount(f, profiles)
+	for i, prof in (cold and pairs or ipairs)(profiles) do
+		if cold then f:writenum(i) end
+		f:write8(#prof.aliases)
+		for _, alias in ipairs(prof.aliases) do
+			f:writestr(alias)
+		end
+		f:writestr(prof.publickey:gsub("%x%x", hex2char))
 	end
 end
 
@@ -221,9 +240,99 @@ local function clearcache()
 	diffcache, deletecache = nil, nil
 end
 
-local function writeColdStore(store)
+-- delete unused profiles and aliases
+local function cleanprofiles()
+	if not (isserver and LiveStore and Profiles) then return end
+
+	-- pass 1: get status of all profiles/aliases
+	local seen = {}
+	for map, checksums in pairs(LiveStore) do
+		for checksum, records in pairs(checksums)
+			for _, record in ipairs(records) do
+				for _, p in ipairs(record.players) do
+					seen[p.pid] = $ or {}
+					seen[p.pid][p.alias] = true
+				end
+			end
+		end
+	end
+
+	--[[
+	print("SEEN")
+	for pid, aliases in pairs(seen) do
+		print(("p %d %s"):format(pid, Profiles[pid].publickey:sub(1, 16)))
+		for alias in pairs(aliases) do
+			print(("a %d %s"):format(alias, Profiles[pid].aliases[alias]))
+		end
+	end
+	--]]
+
+	-- initialize translation table from old to new IDs
+	local pidtrans, aliastrans = {}, {}
+	local proflen, aliaslen = #Profiles, {}
+	for i, prof in ipairs(Profiles) do
+		pidtrans[i] = i
+		if seen[i] then
+			aliastrans[i] = {}
+			aliaslen[i] = #prof.aliases
+			for j in ipairs(prof.aliases) do
+				aliastrans[i][j] = j
+			end
+		end
+	end
+
+	-- pass 2: delete profiles/aliases, and adjust translations
+	for i, prof in ipairs(Profiles) do
+		if not seen[i] then
+			table.remove(Profiles, i)
+			DirtyProfs[i] = nil
+			for o = i, proflen do
+				pidtrans[o] = $ - 1
+			end
+		else
+			local aliases = prof.aliases
+			for j in ipairs(aliases) do
+				if not seen[i][j] then
+					table.remove(aliases, j)
+					for o = j, aliaslen[i] do
+						aliastrans[i][o] = $ - 1
+					end
+				end
+			end
+		end
+	end
+
+	--[[
+	print("TRANS")
+	for old, new in pairs(pidtrans) do
+		print(("p %d %d"):format(old, new))
+	end
+
+	print("ALIASTRANS")
+	for pid, aliases in pairs(aliastrans) do
+		for old, new in pairs(aliases) do
+			print(("a%d %d %d"):format(pid, old, new))
+		end
+	end
+	--]]
+
+	-- pass 3: translate to new IDs in the store
+	for map, checksums in pairs(LiveStore) do
+		for checksum, records in pairs(checksums)
+			for _, record in ipairs(records) do
+				for _, p in ipairs(record.players) do
+					p.alias = aliastrans[p.pid][$]
+					p.pid = pidtrans[$]
+				end
+			end
+		end
+	end
+end
+
+local function writeColdStore(store, profs)
 	local f = StringWriter()
 	f:writestr(StoreName)
+	writeProfiles(f, profs, true)
 	writeMapStore(f, store)
 	return table.concat(f)
 end
@@ -240,6 +349,12 @@ local function dumpStoreToFile()
 		f:writenum(id)
 	end
 
+	writeCount(f, DirtyProfs)
+	for id in pairs(DirtyProfs) do
+		f:write16(id)
+	end
+
+	writeProfiles(f, Profiles, false)
 	writeMapStore(f, LiveStore)
 
 	write_segmented(string.format("Leaderboard/%s/store.sav2", StoreName), table.concat(f))
@@ -252,7 +367,7 @@ local function recordsIdentical(a, b)
 	end
 	for i, p in ipairs(a.players) do
 		local bp = b.players[i]
-		if p.name ~= bp.name or p.skin ~= bp.skin or p.color ~= bp.color or p.stat ~= bp.stat then return false end
+		if p.pid ~= bp.pid or p.alias ~= bp.alias or p.skin ~= bp.skin or p.color ~= bp.color or p.stat ~= bp.stat then return false end
 	end
 	return true
 end
@@ -398,6 +513,67 @@ local function SaveRecord(score, map, modeSep, ghosts)
 end
 rawset(_G, "lb_save_record", SaveRecord)
 
+local getProfile = RINGS and function(player)
+	for i, prof in ipairs(Profiles) do
+		if prof.publickey == player.publickey then
+			return i
+		end
+	end
+end or function(player)
+	for i, prof in ipairs(Profiles) do
+		if prof.aliases[1] == player.name then
+			return i
+		end
+	end
+end
+rawset(_G, "lb_get_profile", getProfile)
+
+local function getAlias(name, pid)
+	for i, alias in ipairs(Profiles[pid].aliases) do
+		if alias == name then
+			return i
+		end
+	end
+end
+rawset(_G, "lb_get_alias", getAlias)
+
+local function newProfile(player)
+	local aliases = { player.name }
+	local prof = profile_t(aliases, RINGS and player.publickey or "")
+	if #Profiles >= MAXPROFILES then
+		error("TOO MANY PROFILES!?")
+	end
+	table.insert(Profiles, prof)
+	DirtyProfs[#Profiles] = true
+	print("Added new profile "..#Profiles)
+	return #Profiles
+end
+rawset(_G, "lb_new_profile", newProfile)
+
+local newAlias = RINGS and function(name, pid)
+	local prof = Profiles[pid]
+	if #prof.aliases >= MAXALIASES then
+		error("TOO MANY ALIASES!?")
+	end
+	DirtyProfs[pid] = true
+	table.insert(prof.aliases, name)
+	print("Added new alias "..name)
+	return #prof.aliases
+end or function()
+	error("Can't make new aliases in Kart!")
+end
+rawset(_G, "lb_new_alias", newAlias)
+
+local function recordName(p)
+	return Profiles[p.pid].aliases[p.alias]
+end
+rawset(_G, "lb_record_name", recordName)
+
+local function profileKey(p)
+	return Profiles[p.pid].publickey
+end
+rawset(_G, "lb_profile_key", profileKey)
+
 local function oldParseScore(str)
 	-- Leaderboard is stored in the following tab separated format
 	-- mapnum, name, skin, color, time, splits, flags, stat
@@ -431,6 +607,7 @@ local function oldParseScore(str)
 	-- thanks windows
 	checksum = $:sub(1, 4)
 
+	local fakep = { name = t[2] }
 	return score_t(
 		flags,
 		tonumber(t[5]),	-- Time
@@ -438,7 +615,8 @@ local function oldParseScore(str)
 		splits,
 		{
 			player_t(
-				t[2], -- Name
+				getProfile(fakep) or newProfile(fakep),
+				1, -- Name
 				t[3], -- Skin
 				"",
 				tonumber(t[4]), -- Color
@@ -467,7 +645,12 @@ local function parseScoreBinary(f, version)
 	local players = {}
 	local numplayers = f:read8()
 	for i = 1, numplayers do
-		local name = f:readstr()
+		local pid, alias
+		if version >= 3 then
+			pid, alias = f:readpid()
+		else
+			alias = f:readstr() -- will be converted later
+		end
 		local skin = f:readstr()
 		local appear = ""
 		if version >= 2 then
@@ -475,7 +658,7 @@ local function parseScoreBinary(f, version)
 		end
 		local color = f:read8()
 		local stats = f:read8()
-		table.insert(players, player_t(name, skin, appear, color, stat_t(stats >> 4, stats & 0xf)))
+		table.insert(players, player_t(pid, alias, skin, appear, color, stat_t(stats >> 4, stats & 0xf)))
 	end
 
 	return score_t(
@@ -508,11 +691,29 @@ local function loadMapStore(f, version)
 	return store
 end
 
+local keyfmt = ("%02X"):rep(32)
+local function loadProfiles(f, cold)
+	local profs = {}
+	for i = 1, f:readnum() do
+		if cold then i = f:readnum() end
+		local numalias = f:read8()
+		local aliases = {}
+		for j = 1, numalias do
+			aliases[j] = f:readstr()
+		end
+		local key = f:readstr()
+		local publickey = #key and keyfmt:format(key:byte(1, -1)) or ""
+		profs[i] = profile_t(aliases, publickey)
+	end
+	return profs
+end
+
 local function loadColdStore(f)
 	local directory = f:readstr()
+	local profs = loadProfiles(f, true)
 	local store = loadMapStore(f, LEADERBOARD_VERSION)
 
-	return store, directory
+	return store, directory, profs
 end
 
 local function getColdStoreDir(f)
@@ -526,6 +727,8 @@ local function loadStoreFile(directory)
 	LiveStore = {}
 	Dirty = {}
 	NextID = 1
+	Profiles = {}
+	DirtyProfs = {}
 
 	local f = read_segmented(string.format("Leaderboard/%s/store.sav2", StoreName))
 	if not f then
@@ -546,7 +749,30 @@ local function loadStoreFile(directory)
 		Dirty[f:readnum()] = true
 	end
 
+	if version >= 3 then
+		for _ = 1, f:readnum() do
+			DirtyProfs[f:read16()] = true
+		end
+		Profiles = loadProfiles(f, false)
+	end
+
 	LiveStore = loadMapStore(f, version)
+
+	if version < 3 then -- convert names to profiles?
+		for map, checksums in pairs(LiveStore) do
+			for checksum, records in pairs(checksums) do
+				for _, record in ipairs(records) do
+					for _, p in ipairs(record.players) do
+						local fakep = { name = p.alias }
+						p.pid = getProfile(fakep) or newProfile(fakep)
+						p.alias = 1
+					end
+				end
+			end
+		end
+	end
+
+	cleanprofiles()
 	clearcache()
 end
 
@@ -635,6 +861,7 @@ local function moveRecords(sourcemap, sourcesum, sourceids, targetmap, targetsum
 		LiveStore[sourcemap][sourcesum] = nil
 	end
 
+	cleanprofiles()
 	if isserver then
 		dumpStoreToFile()
 		clearcache()
@@ -645,10 +872,10 @@ end
 rawset(_G, "lb_move_records", moveRecords)
 
 -- if we've got a coldstore loaded, apply the server's diff onto it
-local function applyColdStore(diff)
-	local coldstore, directory = loadColdStore(StringReader(coldloaded))
+local function applyColdStore(diff, diffprof)
+	local coldstore, directory, coldprofs = loadColdStore(StringReader(coldloaded))
 	if directory ~= StoreName then
-		return diff
+		return diff, coldprofs
 	end
 	for map, checksums in pairs(diff) do
 		if not coldstore[map] then coldstore[map] = {} end
@@ -670,7 +897,12 @@ local function applyColdStore(diff)
 			end
 		end
 	end
-	return coldstore
+	for i, prof in pairs(diffprof) do
+		if #prof.aliases then
+			coldprofs[i] = prof
+		end
+	end
+	return coldstore, coldprofs
 end
 
 -- makes a diff to send to clients, and saves it
@@ -700,6 +932,11 @@ local function makecache()
 		highest = max($, i)
 	end
 
+	local sendprof = {}
+	for i, prof in ipairs(Profiles) do
+		sendprof[i] = DirtyProfs[i] and prof or nil
+	end
+
 	local deleted = StringWriter()
 	for i = 1, highest do
 		if not byid[i] then
@@ -708,7 +945,7 @@ local function makecache()
 	end
 
 	squishStore(send)
-	diffcache, deletecache = writeColdStore(send), table.concat(deleted)
+	diffcache, deletecache = writeColdStore(send, sendprof), table.concat(deleted)
 end
 
 -- wait until netvars/mapchange so the savegame has a chance to set cv_directory
@@ -735,16 +972,17 @@ local function netvars(net)
 		net(diffcache, deletecache, NextID)
 	else
 		loadit()
-		local diff = loadColdStore(StringReader(net("Yes I would like uhhh")))
+		local diff, _, diffprof = loadColdStore(StringReader(net("Yes I would like uhhh")))
 		local deleted = StringReader(net("two strings please"))
 		local deletions = {}
 		while not deleted:empty() do
 			deletions[deleted:readnum()] = true
 		end
 		if coldloaded then
-			diff = applyColdStore($)
+			diff, diffprof = applyColdStore($1, $2)
 		end
 		local nextid = net("oh and a number")
+		Profiles = diffprof
 		mergeStore(diff, deletions, nextid)
 		NextID = nextid
 	end
@@ -761,6 +999,8 @@ COM_AddCommand("lb_write_coldstore", function(player, filename)
 		filename = $..".txt"
 	end
 
+	cleanprofiles()
+
 	local store = {}
 	for map, checksums in pairs(LiveStore) do
 		store[map] = $ or {}
@@ -774,7 +1014,7 @@ COM_AddCommand("lb_write_coldstore", function(player, filename)
 
 	squishStore(store)
 
-	local dat = writeColdStore(store)
+	local dat = writeColdStore(store, Profiles)
 	--[[
 	local f = open("coldstore.sav2", "wb")
 	f:write(dat)
@@ -788,6 +1028,7 @@ COM_AddCommand("lb_write_coldstore", function(player, filename)
 
 	print("Cold store script written to "..filename.." (rename to "..filename:gsub(".txt", ".lua").."!)")
 	Dirty = {}
+	DirtyProfs = {}
 	dumpStoreToFile()
 	clearcache()
 end, COM_LOCAL)
@@ -816,6 +1057,22 @@ COM_AddCommand("lb_known_maps", function(player, map)
 	end
 end, COM_LOCAL)
 
+COM_AddCommand("lb_statistics", function(player)
+	local numrecords = 0
+	for map, checksums in pairs(LiveStore) do
+		for checksum, records in pairs(checksums) do
+			numrecords = $ + #records
+		end
+	end
+	local prof = getProfile(player) and Profiles[getProfile(player)]
+	print(
+		("Number of records:  %d\n"):format(numrecords)..
+		("Number of profiles: %d/%d\n"):format(#Profiles, MAXPROFILES)..
+		("Your aliases:       %d/%d\n"):format(prof and #prof.aliases or 0, MAXALIASES)..
+		("Size of diff:       %d bytes"):format(diffcache and #diffcache + #deletecache or 0)
+	)
+end, COM_LOCAL)
+
 if not RINGS then
 COM_AddCommand("lb_convert_to_binary", function(player, filename)
 	filename = $ or "leaderboard.coldstore.txt"
@@ -826,6 +1083,7 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 	end
 	print("Converting "..filename.." to binary")
 	LiveStore = {}
+	Profiles = {}
 	NextID = 1
 	for l in f:lines() do
 		local score, map, checksum = oldParseScore(l)
@@ -838,8 +1096,10 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 	end
 	f:close()
 	Dirty = {}
+	DirtyProfs = {}
 
 	dumpStoreToFile()
 	clearcache()
+	print("Conversion succeeded")
 end, COM_LOCAL)
 end -- if not RINGS

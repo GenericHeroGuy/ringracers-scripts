@@ -11,6 +11,7 @@ local ghost_t = lb_ghost_t
 -- lb_store.lua
 local ReadGhost = lb_read_ghost
 local DeleteGhost = lb_delete_ghost
+local RecordName = lb_record_name
 
 -----------------------------
 
@@ -876,7 +877,7 @@ local function StartPlaying(record)
 
 		local rep = setmetatable({
 			file = StringReader(ghosts[i].data),
-			name = recplayer.name,
+			name = RecordName(recplayer),
 			startofs = ghosts[i].startofs,
 			starttime = record.starttime,
 			curtic = 0, -- ghost's leveltime
