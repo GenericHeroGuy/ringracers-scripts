@@ -69,31 +69,31 @@ end
 -------------------------
 
 local cv_log = CV_RegisterVar({
-	name = "lb_comms_log",
+	name = "lb_net_log",
 	defaultvalue = "Info",
 	possiblevalue = { None = 0, Warn = 1, Info = 2, Verbose = 3, Debug = 4 }
 })
 
 local cv_bandwidth = CV_RegisterVar({
-	name = "lb_comms_bandwidth",
+	name = "lb_net_bandwidth",
 	defaultvalue = 192,
 	possiblevalue = { MIN = 16, MAX = 247 }
 })
 
 local cv_timeout = CV_RegisterVar({
-	name = "lb_comms_timeout",
+	name = "lb_net_timeout",
 	defaultvalue = TICRATE,
 	possiblevalue = { MIN = TICRATE/4, MAX = TICRATE*3 }
 })
 
 local cv_droptest = CV_RegisterVar({
-	name = "lb_comms_droptest",
+	name = "lb_net_droptest",
 	defaultvalue = 0,
 	possiblevalue = CV_Unsigned
 })
 
 local cv_filetransfer = VERSION == 2 and CV_RegisterVar({
-	name = "lb_comms_filetransfer",
+	name = "lb_net_filetransfer",
 	defaultvalue = "On",
 	possiblevalue = CV_OnOff
 })

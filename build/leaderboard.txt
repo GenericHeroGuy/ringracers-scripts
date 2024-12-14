@@ -3,8 +3,8 @@ $output out/leaderboard.pk3
 
 Lua/lb_common.lua
 Lua/lb_store.lua
-Lua/lbcomms.lua
-Lua/bghost.lua
+Lua/lb_net.lua
+Lua/lb_ghost.lua
 Lua/browser.lua
 Lua/lb_targets.lua
 Lua/**

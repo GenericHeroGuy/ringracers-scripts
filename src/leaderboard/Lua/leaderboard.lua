@@ -39,15 +39,15 @@ local NewAlias = lb_new_alias
 local RecordName = lb_record_name
 local ProfileKey = lb_profile_key
 
--- bghost.lua
+-- lb_ghost.lua
 local GhostStartRecording = lb_ghost_start_recording
 local GhostStopRecording = lb_ghost_stop_recording
 local GhostStartPlaying = lb_ghost_start_playing
 local GhostIsRecording = lb_ghost_is_recording
 local GhostTimer = lb_ghost_timer
 
--- lbcomms.lua
-local CommsRequestGhosts = lb_request_ghosts
+-- lb_net.lua
+local RequestGhosts = lb_request_ghosts
 
 -- lb_targets.lua
 local TargetsLeft = lb_targets_left
@@ -872,8 +872,7 @@ addHook("MapLoad", function()
 				continue
 			end
 			if not (GhostStartPlaying(score) or isserver) then
-				local map = gamemap
-				CommsRequestGhosts(score.id, function(ok, data)
+				RequestGhosts(score.id, function(ok, data)
 					if not ok then return end
 					local ghosts = {}
 					data = StringReader(data)
