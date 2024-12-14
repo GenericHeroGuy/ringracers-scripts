@@ -855,7 +855,7 @@ local function SpawnCombiLink(r)
 end
 
 -- plays the ghost(s) stored in the provided record
-local function StartPlaying(record)
+local function StartPlaying(record, seek)
 	if isdedicatedserver then
 		return true
 	end
@@ -895,6 +895,7 @@ local function StartPlaying(record)
 			gmoma = 0,
 			realangle = 0,
 			recid = record.id,
+			seekto = seek or false,
 
 			fspecial = 0,
 			lastfspecial = 0,
@@ -954,8 +955,8 @@ local function StartPlaying(record)
 
 	return true
 end
-rawset(_G, "lb_ghost_start_playing", function(record)
-	local ok, ret = pcall(StartPlaying, record)
+rawset(_G, "lb_ghost_start_playing", function(record, seek)
+	local ok, ret = pcall(StartPlaying, record, seek)
 	if not ok then
 		print("\x82WARNING:\x80 Failed to start ghost", ret)
 		if record and record.id ~= nil then
@@ -1204,6 +1205,38 @@ local booleans = {
 }
 
 local function PlayGhostTic(r)
+	-- flip the playback direction
+	local flip = r.dorewind or r.rewinding and not r.curtic
+	if r.paused then
+		if r.rewinding then
+			flip = r.doforward or not r.curtic
+		else
+			flip = r.dorewind
+		end
+	end
+	if flip then
+		r.dorewind = false
+		if r.rewinding then
+			r.file:seek(r.ticlog[r.curtic])
+		end
+		r.rewinding = not $
+		P_SetOrigin(r.mo, r.mo.x - r.gmomx, r.mo.y - r.gmomy, r.mo.z - r.gmomz)
+		r.realangle = $ - r.gmoma
+		r.gmomx = -$
+		r.gmomy = -$
+		r.gmomz = -$
+		r.gmoma = -$
+	end
+
+	if r.rewinding then
+		r.curtic = $ - 1
+		r.file:seek(r.ticlog[r.curtic])
+	elseif not r.ticlog[r.curtic] then
+		-- log the offsets of all tics for rewinding
+		-- should've used a RISC architecture for ghost files :^)
+		r.ticlog[r.curtic] = r.file:tell()
+	end
+
 	if r.curtic < r.startofs then
 		r.curtic = $ + 1
 		return
@@ -1529,7 +1562,9 @@ local function PlayGhostTic(r)
 		r.mo.eflags = $ & ~MFE_VERTICALFLIP
 	end
 
-	r.curtic = $ + 1
+	if not r.rewinding then
+		r.curtic = $ + 1
+	end
 end
 
 local errorghost
@@ -1555,6 +1590,12 @@ local function RunGhosts()
 				end
 			end
 		end
+		if r.seekto ~= false then
+			while r.curtic < r.seekto and not r.file:empty() do
+				PlayGhostTic(r)
+			end
+			r.seekto = false
+		end
 		if not r.paused or r.doforward or r.dorewind then
 			if r.doforward and not r.paused then
 				r.fastforward = not $
@@ -1566,43 +1607,7 @@ local function RunGhosts()
 					StopPlaying(r)
 					break
 				end
-
-				-- flip the playback direction
-				local flip = r.dorewind or r.rewinding and not r.curtic
-				if r.paused then
-					if r.rewinding then
-						flip = r.doforward or not r.curtic
-					else
-						flip = r.dorewind
-					end
-				end
-				if flip then
-					r.dorewind = false
-					if r.rewinding then
-						r.file:seek(r.ticlog[r.curtic])
-					end
-					r.rewinding = not $
-					P_SetOrigin(r.mo, r.mo.x - r.gmomx, r.mo.y - r.gmomy, r.mo.z - r.gmomz)
-					r.realangle = $ - r.gmoma
-					r.gmomx = -$
-					r.gmomy = -$
-					r.gmomz = -$
-					r.gmoma = -$
-				end
-
-				if r.rewinding then
-					r.curtic = $ - 1
-					r.file:seek(r.ticlog[r.curtic])
-				elseif not r.ticlog[r.curtic] then
-					-- log the offsets of all tics for rewinding
-					-- should've used a RISC architecture for ghost files :^)
-					r.ticlog[r.curtic] = r.file:tell()
-				end
-
 				PlayGhostTic(r)
-				if r.rewinding then
-					r.curtic = $ - 1
-				end
 			end
 			r.doforward = false
 			r.dorewind = false

@@ -883,6 +883,8 @@ addHook("MapLoad", function()
 						ghosts[i] = ghost_t(gdata, startofs)
 					end
 					WriteGhost(score, ghosts)
+					-- try to start mid-game
+					GhostStartPlaying(score, leveltime)
 				end)
 			end
 		end
