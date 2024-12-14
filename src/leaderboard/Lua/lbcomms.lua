@@ -12,6 +12,7 @@ local StringReader = lb_string_reader
 local StringWriter = lb_string_writer
 
 -- lb_store.lua
+local GetMapRecords = lb_get_map_records
 local ReadGhost = lb_read_ghost
 
 ----------------------------
@@ -182,21 +183,21 @@ local packets = {
 			end
 			if isserver then return end
 			for _, rx in ipairs(myconnections) do
-				if rx.channel == channel and rx.state == "receiving" then
-					io.open("the filename here doesn't matter.sav2", "rb", function(file, name)
-						local data = file:read("*a")
-						table.insert(rx.data, data)
-						rx.bytecount = $ + #data
-						timeout[p] = 0
-						if rx.bytecount == rx.finallength then
-							rx.state = false
-							if rx.callback then
-								rx.callback(true, table.concat(rx.data))
-							end
+				if rx.channel ~= channel or rx.state ~= "receiving" then continue end
+
+				io.open("the filename here doesn't matter.sav2", "rb", function(file, name)
+					local data = file:read("*a")
+					table.insert(rx.data, data)
+					rx.bytecount = $ + #data
+					timeout[p] = 0
+					if rx.bytecount == rx.finallength then
+						rx.state = false
+						if rx.callback then
+							rx.callback(true, table.concat(rx.data))
 						end
-					end)
-					return
-				end
+					end
+				end)
+				return
 			end
 			verbose("ignoring filesend")
 			io.open("not for us, but we still need to open it.sav2", "rb", do end)
@@ -246,22 +247,22 @@ local packets = {
 				return
 			end
 
-			local maprecords = lb_get_map_records(gamemap, -1)
+			local maprecords = GetMapRecords(gamemap, -1)
 			local ghostdata = StringWriter()
 			for mode, records in pairs(maprecords) do
 				for _, record in ipairs(records) do
-					if record.id == recordid then
-						-- gotcha!
-						local ghosts = ReadGhost(record)
-						if not ghosts then
-							verbose("no ghosts saved")
-							return
-						end
-						for i, ghost in ipairs(ghosts) do
-							ghostdata:write8(i)
-							ghostdata:writenum(ghost.startofs)
-							ghostdata:writelstr(ghost.data)
-						end
+					if record.id ~= recordid then continue end
+
+					-- gotcha!
+					local ghosts = ReadGhost(record)
+					if not ghosts then
+						verbose("no ghosts saved")
+						return
+					end
+					for i, ghost in ipairs(ghosts) do
+						ghostdata:write8(i)
+						ghostdata:writenum(ghost.startofs)
+						ghostdata:writelstr(ghost.data)
 					end
 				end
 			end
@@ -285,7 +286,7 @@ local packets = {
 				pakqueue = pakqueue,
 				highest = {},
 				checktimer = 0,
-				checkattempts = 5,
+				checkattempts = 3,
 				callback = function(ok) ghostqueue[recordid] = nil end
 			}
 			totalconnections = ($ + 1) % 256
@@ -317,15 +318,15 @@ local packets = {
 			local newchannel = data:readnum() -- server decides the channel
 			local lastpak = data:readnum()
 			for _, rx in ipairs(myconnections) do
-				if rx.ghost_recid == recordid and rx.state == "starting" then
-					rx.state = "receiving"
-					rx.channel = newchannel
-					rx.finallength = ghostlen
-					rx.lastpak = lastpak
-					timeout[server] = 0
-					verbose("Starting download for ghost %d on channel %d", recordid, newchannel)
-					return
-				end
+				if rx.ghost_recid ~= recordid or rx.state ~= "starting" then continue end
+
+				rx.state = "receiving"
+				rx.channel = newchannel
+				rx.finallength = ghostlen
+				rx.lastpak = lastpak
+				timeout[server] = 0
+				verbose("Starting download for ghost %d on channel %d", recordid, newchannel)
+				return
 			end
 			verbose("I didn't ask for ghost %d!", recordid)
 		end,
@@ -399,16 +400,16 @@ local function transferThinker()
 		if timeout[p] > cv_timeout.value + max(TICRATE*3 - leveltime, 0) then
 			timeout[p] = nil
 			for _, rx in ipairs(myconnections) do
-				if rx.state and rx.who == p then
-					if rx.pakqueue and not #rx.pakqueue then
-						verbose("Closing channel %d", rx.channel)
-						if rx.callback then rx.callback(true) end
-					else
-						warn("Timed out on channel %d", rx.channel)
-						if rx.callback then rx.callback(false) end
-					end
-					rx.state = false
+				if not rx.state or rx.who ~= p then continue end
+
+				if rx.pakqueue and not #rx.pakqueue then
+					verbose("Closing channel %d", rx.channel)
+					if rx.callback then rx.callback(true) end
+				else
+					warn("Timed out on channel %d", rx.channel)
+					if rx.callback then rx.callback(false) end
 				end
+				rx.state = false
 			end
 		end
 	end
@@ -436,40 +437,37 @@ local function transferThinker()
 		end
 	end
 
+	-- run all senders
 	for _, tx in ipairs(myconnections) do
-		if not tx.state then continue end
-
-		if tx.state == "sending" then
-			-- send a slice
-			if #tx.pakqueue then
-				if cv_filetransfer and cv_filetransfer.value then
-					if filesending then continue end
-					local f = io.openlocal("commstmp.sav2", "wb")
-					f:write(table.concat(tx.chunks))
-					f:close()
-					tx.state = false
-					verbose("FILE SEND GO")
-					io.open("commstmp.sav2", "rb", function()
-						filesending = false
-						tx.callback()
-					end)
-					sendPacket("filesend", tx.channel, "")
-					filesending = true
-				else
-					local dat = StringWriter()
-					local pakid = table.remove(tx.pakqueue, 1)
-					dat:write16(pakid)
-					dat:writeliteral(tx.chunks[pakid])
-					if cv_droptest.value and not (leveltime % cv_droptest.value) then continue end
-					sendPacket("send", tx.channel, table.concat(dat))
-					timeout[tx.who] = 0
-					if not #tx.pakqueue then
-						verbose("Channel %d finished", tx.channel)
-						tx.checktimer = 3*cv_timeout.value/4
-					end
+		if tx.state == "sending" and #tx.pakqueue then
+			if cv_filetransfer and cv_filetransfer.value then
+				if filesending then continue end
+				local f = io.openlocal("commstmp.sav2", "wb")
+				f:write(table.concat(tx.chunks))
+				f:close()
+				tx.state = false
+				verbose("FILE SEND GO")
+				io.open("commstmp.sav2", "rb", function()
+					filesending = false
+					tx.callback()
+				end)
+				sendPacket("filesend", tx.channel, "")
+				filesending = true
+			else
+				local dat = StringWriter()
+				local pakid = table.remove(tx.pakqueue, 1)
+				dat:write16(pakid)
+				dat:writeliteral(tx.chunks[pakid])
+				if cv_droptest.value and not (leveltime % cv_droptest.value) then continue end
+				sendPacket("send", tx.channel, table.concat(dat))
+				timeout[tx.who] = 0
+				if not #tx.pakqueue then
+					verbose("Channel %d finished", tx.channel)
+					tx.checktimer = 3*cv_timeout.value/4
 				end
-				return
 			end
+			-- one per tic, please!
+			return
 		end
 	end
 
@@ -486,6 +484,8 @@ local function transferThinker()
 end
 
 addHook("ThinkFrame", transferThinker)
+addHook("IntermissionThinker", transferThinker)
+addHook("VoteThinker", transferThinker)
 
 local function RequestGhosts(id, callback)
 	for _, rx in ipairs(myconnections) do
@@ -508,7 +508,7 @@ end
 rawset(_G, "lb_request_ghosts", RequestGhosts)
 
 local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
-hud.add(function(v, p)
+local function drawTransfers(v)
 	for i, tx in ipairs(myconnections) do
 		if not tx.state then continue end
 		local str = ("[%d/%d] %s: "):format(i, #myconnections, tx.state)
@@ -523,4 +523,9 @@ hud.add(function(v, p)
 		v.drawString(0, 196, str, V_SNAPTOBOTTOM|V_SNAPTOLEFT|V_ALLOWLOWERCASE|V_40TRANS, "small")
 		break
 	end
-end)
+end
+
+hud.add(drawTransfers, "game")
+hud.add(drawTransfers, "scores")
+pcall(hud.add, drawTransfers, "intermission")
+pcall(hud.add, drawTransfers, "vote")
