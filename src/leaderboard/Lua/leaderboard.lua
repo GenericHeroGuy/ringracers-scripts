@@ -874,12 +874,7 @@ addHook("MapLoad", function()
 			if not (GhostStartPlaying(score) or isserver) then
 				local map = gamemap
 				CommsRequestGhosts(score.id, function(ok, data)
-					if not ok then
-						print("Ghost download failed "..score.id)
-						return
-					end
-					-- yay upvalues!
-					print("Got ghost for "..score.id)
+					if not ok then return end
 					local ghosts = {}
 					data = StringReader(data)
 					while not data:empty() do
