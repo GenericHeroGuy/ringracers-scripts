@@ -1,92 +1,150 @@
 Binary leaderboard spec
 
-// map stores (one per map)
+Both server and client have their own copies of the store, stored in...
+Kart: luafiles/Leaderboard/<DIRECTORY>
+RR:   luafiles/client/Leaderboard/<DIRECTORY>
+(<DIRECTORY>: value of lb_directory)
+
+The main file for record data is "store_0.sav2", which is segmented.
+Further segments are named "store_1.sav2", "store_2.sav2" etc...
+This is to get around the 1-megabyte file size limit, of course :P
+
+Ghost files are stored separately as "g<RECID>.sav2", with <RECID>
+being the record ID they belong to. They contain one ghost for each
+player in the record. These files are NOT segmented.
+
+u*   == unsigned n-bit integer
+num  == variable-length integer (bit 7 set = more bits) (total 1-5 bytes)
+str  == pascal-style string, 1-byte length
+lstr == pascal-style string, 2-byte length
+
+
+Store file spec
+========================================
 magic "LEADERBOARD"
-byte VERSION
-short CHECKSUM // of map title
+u8 VERSION
+num NEXTID
 
-num NUMRECORDS
-	num ID
+num NUMDIRTY
+	num DIRTY
 
-	num FLAGS
-	// b0:   SPB Attack
-	// b1:   SPBA justice
-	// b2:   SPBA KARTBIG
-	// b3:   SPBA expert
-	// b4:   combi
-	// b5:   has ghosts
-	// b7:   encore
+(ver >= 3: profile data)
+num NUMDIRTYPROFS
+	u16 DIRTYPROF
 
-	num TIME
+num NUMPROFILES
+	// profile id (pid) = index in array, 1-based
+	u8 NUMALIASES
+		str ALIAS
+	str PUBLICKEY
+(end profiles)
 
-	byte NUMSPLITS
-		num SPLIT
+num NUMMAPS
+	str MAPNAME
+	num NUMCHECKSUMS
+		u16 CHECKSUM
+		num NUMRECORDS
+			num ID
+			num FLAGS
+			// b0:   SPB Attack
+			// b1:   SPBA justice
+			// b2:   SPBA KARTBIG
+			// b3:   SPBA expert
+			// b4:   combi
+			// b5:   has ghosts
+			// b7:   encore
+			num TIME
+			num STARTTIME (ver >= 2)
+			u8 NUMSPLITS
+				num SPLIT
+			u8 NUMPLAYERS
+				u24 PROFILE (ver >= 3) // b0-15: pid, b16-23: alias
+				str NAME (ver <  3)
+				str SKIN
+				str APPEAR (ver >= 2)
+				u8 COLOR
+				u8 STATS // b4-7: speed, b0-3: weight
 
-	byte NUMPLAYERS
-		string NAME
-		string SKIN
-		byte COLOR
-		byte STATS // b7-4: speed, b0-3: weight
-		lstring GHOST
 
-num is a variable-length number, bit 7 set indicates more data
-strings are pascal-style, string = 1 byte length, lstring = 2 bytes length
-
-
-// coldstore script
+Coldstore script spec
+========================================
 magic "COLDSTORE"
 // no version field, keep your coldstore updated!
-string DIRNAME // lb_store_directory
+str DIRNAME // lb_directory
 
-// for each map (repeated until EOF)
-	num MAPNUM
-	short CHECKSUM
-	num NUMRECORDS
-		// see record format above
-
+num NUMPROFILES (ver >= 3)
+	// profile data... see above
+num NUMMAPS
+	// map data... see above
 
 
-Binary ghost data spec
+Ghost file spec
+========================================
+magic "GHOST"
+u8 VERSION
 
-// ghost header
-num STARTOFS // leveltime when ghost starts
+u8 NUMGHOSTS
+	num STARTOFS // leveltime when ghost data starts
+	lstr GHOSTDATA
 
-// repeat until end of file
-byte FLAGS
-// b0-3: "fake" mobj frame (basically divided by 2, see below)
+
+Ghost data format
+========================================
+// for each tic. repeats until end of data
+u8 FLAGS
+// b0-3: fakestate (see below)
 // b4: XY present
 // b5: Z present
 // b6: angle present
-// b7: ghost special
-
-// 8-bit signed momentum/angle delta (with varying precision)
+// b7: ghost special (read this byte as a special, then re-read flags byte)
+//     see lb_ghost.lua for all the specials. there are WAY too many
 bloat/nil XDELTA
 bloat/nil YDELTA
 bloat/nil ZDELTA
 bloat/nil ADELTA
 
-bloating point?
-not really floating point, just encodes 4 bits of the number at a time
-1 sign bit
-3 exponent bits
-4 fraction bits
-exp 0: FRACBITS+12 (31-28)
-exp 1: FRACBITS+8  (27-24)
-exp 2: FRACBITS+4  (23-20)
-exp 3: FRACBITS+0  (19-16)
-exp 4: FRACBITS-4  (15-12)
-exp 5: FRACBITS-8  (11-8)
-exp 6: FRACBITS-12 (7-4)
-exp 7: FRACBITS-16 (3-0)
 
-fake mobj frames
-why store the full frame number when you can just store the specific animation?
-0: STAND   8: RUNR
-1: STANDL  9: DRIFTL
-2: STANDR  10: DRIFTR
-3: WALK    11: SPIN
-4: WALKL   12: SQUISH
-5: WALKR   13: POGO
-6: RUN     14: reserved
-7: RUNL    15: reserved
+Bloating point?
+========================================
+Not really floating point, just encodes 4 bits of an integer at a time.
+
+7 654 3210
+s eee ffff
+| ||| ||||
+| ||| ++++- fraction bits
+| +++------ exponent bits (AKA shift count)
++---------- sign bit
+
+exp 0: FRACBITS-16 (0-3)
+exp 1: FRACBITS-12 (4-7)
+exp 2: FRACBITS-8  (8-11)
+exp 3: FRACBITS-4  (12-15)
+exp 4: FRACBITS+0  (16-19)
+exp 5: FRACBITS+4  (20-23)
+exp 6: FRACBITS+8  (24-27)
+exp 7: FRACBITS+12 (28-31) (or 28-30? uh... not sure...)
+
+
+Fake states
+========================================
+Fake states are used as a compact encoding for the player mobj's animation.
+The player mobj's current state (S_*) determines which fakestate is written,
+rather than the current frame, which is often overwritten by Lua :P
+
+Kart: Fake states encode a set of frames.
+0: AB  (STND)   4: KH  (WALK_L) 8:  EL  (RUN_R)   12: R   (SQUISH)
+1: CD  (STND_L) 5: LI  (WALK_R) 9:  MN  (DRIFT_L) 13: AJ  (POGO)
+2: EF  (STND_R) 6: AJ  (RUN)    10: OP  (DRIFT_R) 14: reserved
+3: JG  (WALK)   7: CK  (RUN_L)  11: Q   (SPIN)    15: reserved
+
+NOTE: POGO is not a real state, it's used to encode k_pogospring spinning
+      (this was a mistake. should've replaced it with a ghost special)
 NOTE: Simple AnimaL plays by different rules, see code
+
+RR: Fake states encode a SPR2.
+0: STIN  4: SLWL  8:  FSTR  12: DRRN
+1: STIL  5: SLWR  9:  DRLN  13: DRRO
+2: STIR  6: FSTN  10: DRLO  14: DRRI
+3: SLWN  7: FSTL  11: DRLI  15: SPIN
+
+NOTE: Death sprite is a ghost special
