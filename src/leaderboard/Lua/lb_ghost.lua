@@ -883,6 +883,7 @@ local function StartPlaying(record, seek)
 			curtic = 0, -- ghost's leveltime
 			paused = false,
 			startpaused = false,
+			startstarted = false,
 			fastforward = false,
 			doforward = false,
 			rewinding = false,
@@ -1206,10 +1207,10 @@ local booleans = {
 
 local function PlayGhostTic(r)
 	-- flip the playback direction
-	local flip = r.dorewind or r.rewinding and not r.curtic
+	local flip = r.dorewind or r.rewinding and r.curtic <= r.startofs
 	if r.paused then
 		if r.rewinding then
-			flip = r.doforward or not r.curtic
+			flip = r.doforward or r.curtic <= r.startofs
 		else
 			flip = r.dorewind
 		end
@@ -1572,15 +1573,22 @@ local function RunGhosts()
 	errorghost = nil
 	for r in pairs(replayers) do
 		errorghost = r
+		if r.seekto ~= false then
+			while r.curtic < r.seekto and not r.file:empty() do
+				PlayGhostTic(r)
+			end
+			r.seekto = false
+		end
 		if RINGS then
 			-- pause when ghost touches finish line at the start
-			if r.curtic == r.starttime and not r.startpaused then
-				r.startpaused = true
-				r.paused = true
+			if r.curtic == r.starttime and not r.startpaused or r.paused then
+				if r.paused and not r.startpaused then r.startstarted = true end
+				r.startpaused, r.paused = true, true
 			end
 
 			-- race started, fast-forward to starttime
-			if LB_Started() and r.curtic <= r.starttime then
+			if LB_Started() and not r.startstarted then
+				r.startstarted = true
 				r.paused = false
 				while r.curtic < r.starttime do
 					if r.file:empty() then
@@ -1590,15 +1598,13 @@ local function RunGhosts()
 				end
 			end
 		end
-		if r.seekto ~= false then
-			while r.curtic < r.seekto and not r.file:empty() do
-				PlayGhostTic(r)
-			end
-			r.seekto = false
-		end
 		if not r.paused or r.doforward or r.dorewind then
 			if r.doforward and not r.paused then
 				r.fastforward = not $
+			end
+			if r.doforward or r.dorewind then
+				-- would be rather annoying
+				r.startpaused, r.startstarted = true, true
 			end
 
 			local numtics = r.fastforward and not r.paused and 3 or 1

@@ -847,6 +847,7 @@ COM_AddCommand("lb_delete", function(player, from)
 	)
 end, COM_ADMIN)
 
+local ghostQueue
 addHook("MapLoad", function()
 	TimeFinished = 0
 	splits = {}
@@ -855,6 +856,7 @@ addHook("MapLoad", function()
 	scrollY = 50 * FRACUNIT
 	scrollAcc = 0
 	FlashTics = 0
+	ghostQueue = {}
 	if RINGS then
 		StartTime = gametype == GT_LEADERBOARD and 15*TICRATE or 5*TICRATE + TICRATE/2
 	else
@@ -872,8 +874,9 @@ addHook("MapLoad", function()
 				continue
 			end
 			if not (GhostStartPlaying(score) or isserver) then
+				ghostQueue[score] = true
 				RequestGhosts(score.id, function(ok, data)
-					if not ok then return end
+					if not ok then ghostQueue[score] = nil; return end
 					local ghosts = {}
 					data = StringReader(data)
 					while not data:empty() do
@@ -883,8 +886,7 @@ addHook("MapLoad", function()
 						ghosts[i] = ghost_t(gdata, startofs)
 					end
 					WriteGhost(score, ghosts)
-					-- try to start mid-game
-					GhostStartPlaying(score, leveltime)
+					if ghostQueue[score] then ghostQueue[score] = false end
 				end)
 			end
 		end
@@ -1647,6 +1649,16 @@ local function think()
 
 		help = true
 		return
+	end
+
+	if not defrosting then
+		-- mid-game starts
+		for score, v in pairs(ghostQueue) do
+			if v ~= false then continue end
+			ghostQueue[score] = nil
+			                                      -- i think i'm missing something here
+			GhostStartPlaying(score, leveltime - (RINGS and leveltime >= min(score.starttime, StartTime) and min(StartTime, leveltime) - score.starttime or -1))
+		end
 	end
 
 	hudtime = leveltime
