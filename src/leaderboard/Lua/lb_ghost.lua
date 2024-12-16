@@ -897,6 +897,7 @@ local function StartPlaying(record, seek)
 			realangle = 0,
 			recid = record.id,
 			seekto = seek or false,
+			kartspeed = recplayer.stat >> 4,
 
 			fspecial = 0,
 			lastfspecial = 0,
@@ -1360,6 +1361,12 @@ local function PlayGhostTic(r)
 	if r.driftspark then
 		SpawnDriftSparks(r, r.driftdir)
 	end
+	if r.drifthilitecolor then
+		r.drifthilite = $ + 1
+		if r.drifthilite == 20 then
+			r.drifthilitecolor = 0
+		end
+	end
 	if r.fastlines then
 		SpawnFastLines(r)
 	end
@@ -1373,6 +1380,10 @@ local function PlayGhostTic(r)
 	if RINGS then
 		if dir then -- drawangle offset for drifting
 			r.mo.angle = $ + ANGLE_45*dir
+		end
+
+		if r.fakeawardtimer then
+			r.fakeawardtimer = $ - 1
 		end
 
 		if r.tricking then
@@ -1872,38 +1883,31 @@ end -- if RINGS
 
 ----------------------------------------------------------------------
 
-local function GetKartSpeed(kartspeed, scale)
-	local g_cc
-
-	if gamespeed == 0 then
-		g_cc = 53248 + 3072
-	elseif gamespeed == 2 then
-		g_cc = 77824 + 3072
-	else
-		g_cc = 65536 + 3072
-	end
-
-	local k_speed = 150 + kartspeed*3
-
-	return FixedMul(FixedMul(k_speed<<14, g_cc), scale)
+local function GetKartSpeed(kartspeed)
+	local g_cc = FRACUNIT + (gamespeed-1)*12288 + 3072
+	local k_speed = RINGS and 148 + kartspeed*4 or 150 + kartspeed*3
+	return FixedMul(FixedMul(k_speed<<14, g_cc), mapobjectscale)
 end
 
-local function FakeSpeedometer(speed, scale)
+local ORIG_FRICTION = RINGS and 62720 or 62914
+local function FakeSpeedometer(r)
+	-- ghosts have no friction, but mortals do
+	local speed = FixedMul(FixedHypot(r.gmomx, r.gmomy), ORIG_FRICTION)
 	local dp = CV_FindVar(RINGS and "speedometer" or "kartdisplayspeed")
 	local value = dp.value - (RINGS and 1 or 0)
 	if value == 1 then
-		return string.format("%3d KM/H", FixedDiv(FixedMul(speed, 142371), mapobjectscale)/FRACUNIT)
+		return "KM/H", ("%d"):format(FixedDiv(FixedMul(speed, 142371), mapobjectscale)/FRACUNIT)
 	elseif value == 2 then
-		return string.format("%3d MPH", FixedDiv(FixedMul(speed, 88465), mapobjectscale)/FRACUNIT)
+		return "MPH", ("%d"):format(FixedDiv(FixedMul(speed, 88465), mapobjectscale)/FRACUNIT)
 	elseif value == 3 then
-		return string.format("%3d FU/T", FixedDiv(speed, mapobjectscale)/FRACUNIT)
+		return "FU/T", ("%d"):format(FixedDiv(speed, mapobjectscale)/FRACUNIT)
 	else
-		return string.format("%3d %%", (FixedDiv(speed, FixedMul(GetKartSpeed(consoleplayer.kartspeed, scale), 62914))*100)/FRACUNIT)
+		local maxspeed = FixedMul(GetKartSpeed(r.kartspeed), RINGS and FRACUNIT or ORIG_FRICTION)
+		return "%", ("%d"):format(100*speed/maxspeed)
 	end
 end
 
 local ringbox = {
-	[-1] = "K_SBBG",
 	[-2] = "K_SBBAR",
 	[-3] = "K_SBBAR2",
 	[-4] = "K_SBBAR3",
@@ -1912,92 +1916,88 @@ local ringbox = {
 	[-7] = "K_SBJACK",
 }
 
+local hilitecolors = {
+	[-1] = V_GRAYMAP,
+	RINGS and V_YELLOWMAP or V_BLUEMAP,
+	V_REDMAP,
+	V_BLUEMAP,
+	V_PURPLEMAP
+}
+
 local function GhostTimer()
 	return ghostwatching and max(0, ghostwatching.curtic - ghostwatching.starttime)
 end
 rawset(_G, "lb_ghost_timer", GhostTimer)
 
 hud.add(function(v, p)
-	if ghostwatching then
-		local flags = V_ALLOWLOWERCASE|V_SNAPTOTOP
-		local trans = V_HUDTRANS
-		v.drawString(160, 16, "Watching:", flags|trans, "center")
-		v.drawString(160, 24, ghostwatching.name, flags|trans|V_YELLOWMAP, "center")
+	local gw = ghostwatching
 
-		local speed = FakeSpeedometer(FixedHypot(ghostwatching.gmomx, ghostwatching.gmomy), ghostwatching.mo.scale)
-		flags = ($ & ~V_SNAPTOTOP) | V_MONOSPACE|V_SNAPTOBOTTOM
-		v.drawString(160, 161, speed, flags|trans, "center")
+	-- minimap icons
+	local heads = {}
+	for r in pairs(replayers) do
+		table.insert(heads, r)
+	end
+	local small = CV_FindVar("smallminimapplayers")
+	small = $ and $.value and 2*FRACUNIT/3 or 2*FRACUNIT/4
+	-- ensure ghostwatching draws on top
+	table.sort(heads, function(a, b) return b == gw end)
 
-		if ghostwatching.drifthilitecolor then
-			local color
-			if ghostwatching.drifthilitecolor == 1 then
-				color = RINGS and V_YELLOWMAP or V_BLUEMAP
-			elseif ghostwatching.drifthilitecolor == 2 then
-				color = V_REDMAP
-			elseif ghostwatching.drifthilitecolor == 3 then
-				color = V_BLUEMAP
-			elseif ghostwatching.drifthilitecolor == 4 then
-				color = V_PURPLEMAP
-			else
-				color = V_GRAYMAP
-			end
-			trans = V_10TRANS * (ghostwatching.drifthilite / 2)
-			v.drawString(160, 161, speed, flags|trans|color, "center")
-			ghostwatching.drifthilite = $ + 1
-			if ghostwatching.drifthilite == 2*10 then
-				ghostwatching.drifthilitecolor = 0
-			end
+	for _, r in ipairs(heads) do
+		local skin = r.mo.skin
+		-- not that this works in RR since skipping the titlecard breaks drawOnMinimap...
+		local icon = RINGS and v.getSprite2Patch(skin, SPR2_XTRA, C) or v.cachePatch(skins[skin].facemmap)
+		local scale = r == gw and FRACUNIT or small
+		v.drawOnMinimap(r.mo.x, r.mo.y, scale, icon, v.getColormap(skin, r.mo.color))
+	end
+
+	if not gw then return end
+
+	-- who are you looking at, punk?
+	local trans = v.localTransFlag()
+	local flags = V_ALLOWLOWERCASE|V_SNAPTOTOP|trans
+	if trans <= V_90TRANS then -- trans is V_100TRANS if translucenthud == 0
+		v.drawString(160, 16, "Watching:", flags, "center")
+		v.drawString(160, 24, gw.name, flags|V_YELLOWMAP, "center")
+	end
+
+	-- speedometer
+	flags = V_SNAPTOBOTTOM|V_HUDTRANS
+	local unit, speed = FakeSpeedometer(gw)
+	local ofs = 11 - v.stringWidth(unit)/2
+	v.drawString(162 + ofs, 161, unit, flags)
+	v.drawString(158 + ofs, 161, speed, flags|V_MONOSPACE, "right")
+
+	-- highlight drifts on the speedometer
+	if gw.drifthilitecolor then
+		local hlf = (flags & ~V_ALPHAMASK) | hilitecolors[gw.drifthilitecolor]
+		local fade = V_10TRANS*(gw.drifthilite/2) + max(0, trans - V_20TRANS)
+		if fade | trans <= V_90TRANS then
+			v.drawString(162 + ofs, 161, unit, hlf|fade)
+			v.drawString(158 + ofs, 161, speed, hlf|fade|V_MONOSPACE, "right")
 		end
+	end
 
-		if ghostwatching.hasitem == 1 then
-			trans = V_HUDTRANSHALF
-			v.draw(142, 142, v.cachePatch("K_ISSHOE"), flags|trans, v.getColormap(TC_RAINBOW, ghostwatching.mo.color))
-		elseif ghostwatching.hasitem >= 2 then
-			trans = V_HUDTRANS
-			v.draw(142, 142, v.cachePatch(not RINGS and gametype == GT_MATCH and "K_ISPOGO" or "K_ISSHOE"), flags|trans)
-			if ghostwatching.hasitem > 2 then
-				v.drawString(128, 142, ghostwatching.hasitem - 1, flags|trans, "right")
-			end
-		elseif ghostwatching.hasitem < 0 and (ghostwatching.hasitem == -1 or ghostwatching.fakeawardtimer) then
-			trans = V_HUDTRANS
-			v.draw(142, 142, v.cachePatch(ringbox[ghostwatching.hasitem]), flags|trans)
-			ghostwatching.fakeawardtimer = $ - 1
+	-- item or ringbox
+	if gw.hasitem == 1 then
+		flags = ($ & ~V_HUDTRANS) | V_HUDTRANSHALF
+		v.draw(95, 142, v.cachePatch("K_ISSHOE"), flags, v.getColormap(TC_RAINBOW, gw.mo.color))
+	elseif gw.hasitem >= 2 then
+		v.draw(95, 142, v.cachePatch(not RINGS and gametype == GT_MATCH and "K_ISPOGO" or "K_ISSHOE"), flags)
+		if gw.hasitem > 2 then
+			v.drawString(128, 142, gw.hasitem - 1, flags, "right")
 		end
+	elseif gw.hasitem == -1 or gw.fakeawardtimer then
+		v.draw(101, 151, v.cachePatch("K_SBBG"), flags)
+		local p = ringbox[gw.hasitem]
+		if p then v.draw(101, 151, v.cachePatch(p), flags) end
 	end
 
-	if ghostwatching and ghostmenu then
-		local flags = V_SNAPTOTOP
-		local cmap = v.getColormap(TC_RAINBOW, SKINCOLOR_GOLD)
-		for i, opt in ipairs(menuoptions) do
-			opt.draw(v, i*16+32, 0, flags, i == ghostmenusel and cmap or nil)
-		end
-		v.drawString(48 + 16*#menuoptions/2, 16, menuoptions[ghostmenusel].label(), flags|V_ALLOWLOWERCASE, "center")
-	end
+	if not ghostmenu then return end
 
-	--[[
-	local i = 0
-	for p in pairs(recorders) do
-		v.drawString(100, 80+i, "Recording "..p.name, 0, "thin")
-		i = i + 8
+	flags = V_SNAPTOTOP
+	local cmap = v.getColormap(TC_RAINBOW, SKINCOLOR_GOLD)
+	for i, opt in ipairs(menuoptions) do
+		opt.draw(v, i*16+32, 0, flags, i == ghostmenusel and cmap or nil)
 	end
-
-	local _, g = next(recorders)
-	if g then
-		v.drawString(240, 32, "FX: "..(g.fakex/FRACUNIT))
-		v.drawString(240, 40, "FY: "..(g.fakey/FRACUNIT))
-		v.drawString(240, 48, "FZ: "..(g.fakez/FRACUNIT))
-		v.drawString(240, 56, "FA: "..(g.fakea/ANG1))
-	end
-
-	local r = next(replayers)
-	if r then
-		v.drawString(240, 72, "GX: "..(r.mo.x/FRACUNIT))
-		v.drawString(240, 80, "GY: "..(r.mo.y/FRACUNIT))
-		v.drawString(240, 88, "GZ: "..(r.mo.z/FRACUNIT))
-		v.drawString(240, 96, "GA: "..(r.mo.angle/ANG1))
-		v.drawString(240, 104, "PA: "..tostring(r.paused))
-		local patch = v.cachePatch("BLANKLVL")
-		v.drawOnMinimap(r.mo.x, r.mo.y, FixedDiv(10, patch.height), patch)
-	end
-	--]]
+	v.drawString(48 + 16*#menuoptions/2, 16, menuoptions[ghostmenusel].label(), flags|V_ALLOWLOWERCASE, "center")
 end)
