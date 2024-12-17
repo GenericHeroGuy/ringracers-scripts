@@ -847,7 +847,7 @@ COM_AddCommand("lb_delete", function(player, from)
 	)
 end, COM_ADMIN)
 
-local ghostQueue
+local ghostQueue = {}
 addHook("MapLoad", function()
 	TimeFinished = 0
 	splits = {}
@@ -1815,9 +1815,9 @@ addHook("ThinkFrame", think)
 
 -- WELCOME BACK NEOROULETTE
 -- combi is strictly sneakers only... from item boxes
-local preroulette
-local cv_debugitem
 if not RINGS then
+local preroulette = {}
+local cv_debugitem
 addHook("PreThinkFrame", function()
 	if not disable then
 		for p in players.iterate do
@@ -1826,13 +1826,13 @@ addHook("PreThinkFrame", function()
 	end
 end)
 addHook("PlayerThink", function(p)
+	if disable then return end
+
     if not cv_debugitem then
-        cv_debugitem = CV_FindVar(RINGS and "debugitem" or "kartdebugitem")
+        cv_debugitem = CV_FindVar("kartdebugitem")
     end
 
-    if cv_debugitem.value then return end
-
-	if not disable and preroulette[p] and not p.kartstuff[k_itemroulette] and not p.kartstuff[k_eggmanexplode] then
+	if not cv_debugitem.value and preroulette[p] and not p.kartstuff[k_itemroulette] and not p.kartstuff[k_eggmanexplode] then
 		p.kartstuff[k_itemtype] = KITEM_SNEAKER
 		p.kartstuff[k_itemamount] = 1
 	end
@@ -1868,7 +1868,6 @@ local function netvars(net)
 	TimeFinished = net($)
 	clearcheats = net($)
 	BrowserPlayer = net($)
-	preroulette = net($)
 	StartTime = net($)
 end
 addHook("NetVars", netvars)

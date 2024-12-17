@@ -43,7 +43,7 @@ local fuseset
 -- fault starts change their mapthing type to 0 after being processed
 -- so, sigh... here we go...
 local loading = false
-local oldrings
+local oldrings = {}
 addHook("MapChange", do
 	loading = true
 	faultstart = nil
@@ -130,7 +130,6 @@ addHook("PlayerSpawn", function(p)
 	end
 
 	if (gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE) and not p.spectator then
-		oldrings[p] = {}
 		if gametype == GT_LEADERBOARD then p.rings = 20 end
 		if faultstart ~= true then
 			local fx, fy, fz = faultstart.x<<FRACBITS, faultstart.y<<FRACBITS, faultstart.z<<FRACBITS
@@ -148,9 +147,13 @@ addHook("PlayerSpawn", function(p)
 end)
 
 addHook("PreThinkFrame", function()
-	for p in players.iterate do
-		local old = oldrings[p]
-		if old then
+	if gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE then
+		for p in players.iterate do
+			local old = oldrings[p]
+			if not old then
+				old = {}
+				oldrings[p] = old
+			end
 			old.delay = p.ringboxdelay
 			old.award = p.ringboxaward
 			old.super = p.superring
