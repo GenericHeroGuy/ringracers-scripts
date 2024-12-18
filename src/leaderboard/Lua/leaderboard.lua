@@ -64,7 +64,7 @@ local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
 local MapRecords
 
 local TimeFinished = 0
-local disable = false
+local disable = true
 local prevLap = 0
 local splits = {}
 local PATCH = nil
@@ -291,7 +291,8 @@ local function canstart()
 
 	local n = 0
 	for p in players.iterate do
-		if p.valid and not p.spectator then
+		-- dedi player shows up in players.iterate in RR. i wish i was kidding
+		if not p.spectator and (p ~= server or p.mo) then
 			n = $ + 1
 			if n > (combi and 2 or 1) then
 				return false
@@ -306,7 +307,7 @@ end
 local function singleplayer()
 	local n = 0
 	for p in players.iterate do
-		if p.valid and not p.spectator then
+		if p.mo and not p.spectator then
 			n = $ + 1
 			if n > 1 then
 				return false
@@ -352,9 +353,9 @@ local function initLeaderboard(player)
 	-- so player 2 has to start ghost recording for both players
 	-- bleh
 	for p in players.iterate do
-		if (p.spectator or disable) then
+		if p.spectator or not p.mo or disable then
 			if GhostIsRecording(p) then GhostStopRecording(p) end
-		elseif not (p.spectator or GhostIsRecording(p) or not cv_ghosts.value) then
+		elseif not GhostIsRecording(p) and cv_ghosts.value then
 			GhostStartRecording(p)
 		end
 	end
@@ -897,7 +898,7 @@ end)
 local function getGamers()
 	local gamers = {}
 	for p in players.iterate do
-		if p.valid and not p.spectator then
+		if p.mo and not p.spectator then
 			table.insert(gamers, p)
 		end
 	end
@@ -1614,7 +1615,7 @@ local function think()
 		if cv_antiafk.value and gametype == GT_RACE then
 			if not singleplayer() then
 				for p in players.iterate do
-					if p.valid and not p.spectator and not p.exiting and p.lives > 0 then
+					if p.mo and not p.spectator and not p.exiting and p.lives > 0 then
 						if p.cmd.buttons or p.cmd[TURNING] then
 							p.afkTime = max(TICRATE*8, leveltime)
 						end
@@ -1640,7 +1641,7 @@ local function think()
 				end
 			else
 				for p in players.iterate do
-					if p.valid and not p.spectator then
+					if p.mo and not p.spectator then
 						p.afkTime = leveltime
 					end
 				end
@@ -1688,9 +1689,9 @@ local function think()
 		end
 
 		-- Autospec
-		if leveltime == 1 and gamers[1] then
+		if leveltime == 1 and gamers[1] and not isdedicatedserver then
 			for s in players.iterate do
-				if s.valid and s.spectator then
+				if s.spectator then
 					COM_BufInsertText(s, string.format("view \"%d\"", #gamers[1]))
 				end
 			end
@@ -1789,7 +1790,7 @@ local function think()
 
 	if RINGS and TimeFinished ~= 0 and leveltime - StartTime - 2*TICRATE == TimeFinished then
 		local oldinttime = CV_FindVar("inttime").value
-		COM_BufInsertText(consoleplayer, "tunes racent")
+		if not isdedicatedserver then COM_BufInsertText(consoleplayer, "tunes racent") end
 		musicchanged = true
 		G_SetCustomExitVars(gamemap)
 		COM_BufInsertText(server, "inttime 15; exitlevel; wait 2; inttime "..oldinttime)
@@ -1860,6 +1861,7 @@ function clamp(min_v, v, max_v)
 end
 
 local function netvars(net)
+	disable = net($)
 	Flags = net($)
 	splits = net($)
 	prevLap = net($)
@@ -1879,7 +1881,7 @@ if not RINGS then return end
 
 local function checkmusic()
 	if musicchanged then
-		COM_BufInsertText(consoleplayer, "tunes -default")
+		if not isdedicatedserver then COM_BufInsertText(consoleplayer, "tunes -default") end
 		musicchanged = false
 	end
 end
