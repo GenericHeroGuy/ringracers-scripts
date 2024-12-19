@@ -30,6 +30,8 @@ G_AddGametype({
 	intermissiontype = 2,
 })
 
+-- no GT_LEADERSPECIAL because G_SetCustomExitVars always switches to the default gametype
+
 local cv_ringboxes = CV_RegisterVar({
 	name = "lb_ringboxes",
 	flags = CV_NETVAR,
@@ -39,6 +41,8 @@ local cv_ringboxes = CV_RegisterVar({
 
 local faultstart
 local fuseset
+
+local GAMETYPES = { [GT_LEADERBOARD] = true, [GT_LEADERBATTLE] = true, [GT_SPECIAL] = true }
 
 -- fault starts change their mapthing type to 0 after being processed
 -- so, sigh... here we go...
@@ -129,7 +133,7 @@ addHook("PlayerSpawn", function(p)
 		end
 	end
 
-	if (gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE) and not p.spectator then
+	if GAMETYPES[gametype] and not p.spectator then
 		if gametype == GT_LEADERBOARD then p.rings = 20 end
 		if faultstart ~= true then
 			local fx, fy, fz = faultstart.x<<FRACBITS, faultstart.y<<FRACBITS, faultstart.z<<FRACBITS
@@ -147,7 +151,7 @@ addHook("PlayerSpawn", function(p)
 end)
 
 addHook("PreThinkFrame", function()
-	if gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE then
+	if GAMETYPES[gametype] then
 		for p in players.iterate do
 			local old = oldrings[p]
 			if not old then
@@ -163,7 +167,7 @@ end)
 
 addHook("PlayerThink", function(p)
 	-- do NOT check LB_IsRunning so this works in replays
-	if p.spectator or not (gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE) then return end
+	if p.spectator or not GAMETYPES[gametype] then return end
 
 	local old = oldrings[p]
 	if cv_ringboxes.value == 2 -- TA mode ringboxes
@@ -212,17 +216,82 @@ addHook("PlayerThink", function(p)
 	end
 
 	-- roulette isn't exposed, and item capsules besides rings are disabled in TA, so...
-	if not (gametyperules & GTR_PRISONS) then
+	if gametype == GT_LEADERBOARD then
 		if p.itemtype and p.itemtype ~= KITEM_SNEAKER then
 			p.itemtype = KITEM_SNEAKER
 			p.itemamount = 1
 		end
 	end
 
+	if gametype == GT_SPECIAL and p.exiting then
+		G_SetCustomExitVars(gamemap, 2) -- where do you think you're going?
+	end
+
 	if p.cmd.buttons & BT_RESPAWN then
 		COM_BufAddText(p, "retry")
 	end
 end)
+
+freeslot("S_FAKEUFOPOD")
+
+addHook("MobjThinker", function(mo)
+	if not mo.lbufofix then
+		-- the pod piece calls RNG based on S_SoundPlaying which causes desynchs
+		-- so we'll have to substitute it with an impostor...
+		local piece = mo.hnext
+		while piece.extravalue1 ~= 0 do -- UFO_PIECE_TYPE_POD
+			piece = piece.hnext
+		end
+		piece.type = MT_RAY -- oh yeah, this thing exists
+		piece.state = S_FAKEUFOPOD
+		mo.lbufofix = true
+	end
+end, MT_SPECIAL_UFO)
+
+states[S_FAKEUFOPOD] = {
+	sprite = SPR_UFOB,
+	tics = 1,
+	nextstate = S_FAKEUFOPOD,
+	action = function(actor, var1, var2)
+		local ufo = actor.target
+		if not ufo then
+			P_RemoveMobj(actor)
+			return
+		end
+		if not actor.health then
+			actor.fuse = actor.tics
+			return
+		end
+
+		actor.scalespeed = ufo.scalespeed
+		actor.destscale = 3 * ufo.destscale / 2
+		actor.momx = ufo.x - actor.x
+		actor.momy = ufo.y - actor.y
+		actor.momz = ufo.z + 132*actor.scale - actor.z
+		-- doesn't line up otherwise
+		P_MoveOrigin(actor, ufo.x, ufo.y, ufo.z + 132*actor.scale)
+
+		if ufo.watertop > 70*FRACUNIT then
+			local fast = P_SpawnMobjFromMobj(ufo,
+				P_RandomRange(-120, 120) * FRACUNIT,
+				P_RandomRange(-120, 120) * FRACUNIT,
+				(ufo.info.height / 2) + (P_RandomRange(-24, 24) * FRACUNIT),
+				MT_FASTLINE
+			)
+			fast.scale = $ * 3
+			fast.target = ufo
+			--fast.angle = K_MomentumAngle(ufo)
+			if FixedHypot(ufo.momx, ufo.momy) > 6*ufo.scale then
+				fast.angle = R_PointToAngle2(0, 0, ufo.momx, ufo.momy)
+			else
+				fast.angle = ufo.angle // default to facing angle, rather than 0
+			end
+			fast.color = SKINCOLOR_WHITE
+			fast.colorized = true
+			K_MatchGenericExtraFlags(fast, ufo)
+		end
+	end
+}
 
 addHook("IntermissionThinker", function()
 	if not LB_IsRunning() then return end

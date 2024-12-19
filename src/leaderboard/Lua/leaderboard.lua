@@ -76,7 +76,14 @@ local BrowserPlayer
 local StartTime = 0
 local musicchanged = false
 local hudtime = 0
+local gotEmerald
 
+
+local GAMETYPES = RINGS and {
+	[GT_LEADERBOARD] = true,
+	[GT_LEADERBATTLE] = true,
+	[GT_SPECIAL] = true,
+}
 
 -- Text flash on finish
 local FlashTics = 0
@@ -325,7 +332,7 @@ local function initLeaderboard(player)
 	end
 	local tol, gt = mapheaderinfo[gamemap].typeoflevel
 	if RINGS then
-		gt = tol & TOL_BATTLE and GT_LEADERBATTLE or GT_LEADERBOARD
+		gt = tol & TOL_BATTLE and GT_LEADERBATTLE or tol & TOL_SPECIAL and GT_SPECIAL or GT_LEADERBOARD
 	else
 		gt = tol & TOL_MATCH and GT_MATCH or GT_RACE
 	end
@@ -339,7 +346,7 @@ local function initLeaderboard(player)
 	end
 
 	-- if disabled by gametype, restart with the correct gametype
-	if RINGS and not gtdisable and not (gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE) then
+	if RINGS and not gtdisable and not GAMETYPES[gametype] then
 		nextMap = gamemap
 	end
 
@@ -848,18 +855,23 @@ COM_AddCommand("lb_delete", function(player, from)
 	)
 end, COM_ADMIN)
 
+local STARTTIMES = RINGS and {
+	[GT_LEADERBOARD] = 15*TICRATE,
+	[GT_LEADERBATTLE] = 5*TICRATE + TICRATE/2,
+}
 local ghostQueue = {}
 addHook("MapLoad", function()
 	TimeFinished = 0
 	splits = {}
 	prevLap = 0
+	gotEmerald = false
 	drawState = DS_DEFAULT
 	scrollY = 50 * FRACUNIT
 	scrollAcc = 0
 	FlashTics = 0
 	ghostQueue = {}
 	if RINGS then
-		StartTime = gametype == GT_LEADERBOARD and 15*TICRATE or 5*TICRATE + TICRATE/2
+		StartTime = STARTTIMES[gametype] or 0
 	else
 		StartTime = 6*TICRATE + (3*TICRATE/4)
 	end
@@ -1173,6 +1185,7 @@ local function drawScore(v, player, pos, x, y, gui, score, drawPos)
 
 		-- Draw splits
 		local prev = prevLap - (RINGS and 1 or 0)
+		if RINGS and gametype == GT_SPECIAL then prev = 1 end
 		if showSplit and score["splits"] and score["splits"][prev] != nil then
 			local split = splits[prev] - score["splits"][prev]
 			v.drawString(
@@ -1532,7 +1545,17 @@ end
 COM_AddCommand("save", saveLeaderboard)
 --]]
 
+local maybeemerald
 local function regLap(player)
+	if RINGS and gametype == GT_SPECIAL then
+		if maybeemerald and maybeemerald.target == player.mo and not gotEmerald then
+			gotEmerald = true
+			table.insert(splits, leveltime - StartTime)
+			showSplit = 5 * TICRATE
+		end
+		maybeemerald = nil
+		return
+	end
 	if player.laps > prevLap and TimeFinished == 0 then
 		local lapzero = not prevLap
 		prevLap = player.laps
@@ -1550,12 +1573,34 @@ local function regLap(player)
 	end
 end
 
+if RINGS then
+addHook("TouchSpecial", function(special, toucher)
+	local p = toucher.player
+	if not p or not (p.exiting or p.pflags & PF_NOCONTEST) and not (special.threshold > 0 or toucher.hitlag) then
+		maybeemerald = special.tracer
+	end
+end, MT_SPECIAL_UFO)
+end
+
 local function changeMap()
 	local gt = RINGS and GT_LEADERBOARD or GT_RACE
 	if mapheaderinfo[nextMap].typeoflevel & (RINGS and TOL_BATTLE or TOL_MATCH) then
 		gt = (RINGS and GT_LEADERBATTLE or GT_MATCH)
 	end
-	COM_BufInsertText(server, ("map %d -g %d"):format(nextMap, gt))
+	if RINGS and mapheaderinfo[nextMap].typeoflevel & TOL_SPECIAL then
+		if nextMap == gamemap then
+			COM_BufInsertText(server, "restartlevel")
+		elseif gamestate ~= GS_LEVEL then
+			-- great... can't use G_SetCustomExitVars in intermission
+			-- if we're not in GT_SPECIAL we'll have to go through some gametype switching
+			COM_BufInsertText(server, (gametype == GT_SPECIAL and "map %d" or "map %d -g Race -f"):format(nextMap))
+		else
+			G_SetCustomExitVars(nextMap, 2)
+			COM_BufInsertText(server, "exitlevel")
+		end
+	else
+		COM_BufInsertText(server, ("map %d -g %d"):format(nextMap, gt))
+	end
 	nextMap = nil
 end
 
@@ -1608,9 +1653,10 @@ local function think()
 			minirankings = true
 		end
 		-- don't use our broken gametypes in normal races!
-		if RINGS and (gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE) then
-			local gt = mapheaderinfo[gamemap].typeoflevel & TOL_BATTLE and GT_BATTLE or GT_RACE
-			COM_BufInsertText(server, ("map %d -g %d -f"):format(gamemap, gt))
+		if RINGS and GAMETYPES[gametype] and not replayplayback then
+			local map = gametype == GT_SPECIAL and 2 or gamemap -- i am NOT warping back to sealed stars
+			local gt = mapheaderinfo[map].typeoflevel & TOL_BATTLE and GT_BATTLE or GT_RACE
+			COM_BufInsertText(server, ("map %d -g %d -f"):format(map, gt))
 		end
 		if cv_antiafk.value and gametype == GT_RACE then
 			if not singleplayer() then
@@ -1737,12 +1783,17 @@ local function think()
 		if gametype == (RINGS and GT_LEADERBATTLE or GT_MATCH) then
 			finished = TargetsLeft() == 0
 		end
+		if RINGS and gametype == GT_SPECIAL and p.pflags & PF_NOCONTEST then
+			finished = false -- EMPTY HANDED?
+		end
 		-- must be done before browser control
 		if finished and TimeFinished == 0 then
 			if RINGS then
 				TimeFinished = leveltime - StartTime
-				S_StopSoundByID(nil, sfx_s3kb3) -- no special stage finish sound
-				S_StartSound(nil, sfx_s3k6a)
+				if gametype ~= GT_SPECIAL then
+					S_StopSoundByID(nil, sfx_s3kb3)
+					S_StartSound(nil, sfx_s3k6a)
+				end
 			else
 				TimeFinished = p.realtime
 			end
@@ -1788,12 +1839,17 @@ local function think()
 		drawState = DS_SCROLL
 	end
 
-	if RINGS and TimeFinished ~= 0 and leveltime - StartTime - 2*TICRATE == TimeFinished then
-		local oldinttime = CV_FindVar("inttime").value
-		if not isdedicatedserver then COM_BufInsertText(consoleplayer, "tunes racent") end
-		musicchanged = true
-		G_SetCustomExitVars(gamemap)
-		COM_BufInsertText(server, "inttime 15; exitlevel; wait 2; inttime "..oldinttime)
+	if RINGS and TimeFinished ~= 0 then
+		local exittime = gametype == GT_SPECIAL and 14*TICRATE/5 or 2*TICRATE
+		if leveltime - StartTime == TimeFinished + exittime then
+			local oldinttime = CV_FindVar("inttime").value
+			if not isdedicatedserver then
+				COM_BufInsertText(consoleplayer, "tunes racent")
+				musicchanged = true
+			end
+			G_SetCustomExitVars(gamemap)
+			COM_BufInsertText(server, "inttime 15; exitlevel; wait 2; inttime "..oldinttime)
+		end
 	end
 
 	if not replayplayback then
@@ -1881,7 +1937,7 @@ if not RINGS then return end
 
 local function checkmusic()
 	if musicchanged then
-		if not isdedicatedserver then COM_BufInsertText(consoleplayer, "tunes -default") end
+		COM_BufInsertText(consoleplayer, "tunes -default")
 		musicchanged = false
 	end
 end
@@ -2012,6 +2068,12 @@ hud.add(function(v)
 
 	for i, time in ipairs(laptimes) do
 		local str = ("%02d'%02d\"%02d"):format(time/TICRATE/60, time/TICRATE%60, G_TicsToCentiseconds(time))
+		if gametype == GT_SPECIAL then
+			local icon = v.cachePatch(hudtime % 2 and "K_EMERC" or "K_EMERW")
+			v.draw(x + 13, y + i*12, icon, 0, v.getColormap(TC_DEFAULT, SKINCOLOR_GOLD))
+			DrawMediumString(v, x + 26, y + i*12, str)
+			break
+		end
 		v.draw(x, y + i*12, v.cachePatch("K_SPTLAP"))
 		v.drawString(x + 13, y + 1 + i*12, i)
 		DrawMediumString(v, x + 26, y + i*12, str)

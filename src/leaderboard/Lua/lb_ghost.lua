@@ -1590,7 +1590,7 @@ local function RunGhosts()
 			end
 			r.seekto = false
 		end
-		if RINGS then
+		if RINGS and gametype == GT_LEADERBOARD then
 			-- pause when ghost touches finish line at the start
 			if r.curtic == r.starttime and not r.startpaused or r.paused then
 				if r.paused and not r.startpaused then r.startstarted = true end
