@@ -1008,10 +1008,16 @@ local function StopPlaying(replay)
 	if ghostwatching == replay then NextWatch() end
 end
 
-addHook("MapChange", function()
+local function reset()
 	replayers = {}
 	StopWatching(true)
-end)
+end
+addHook("MapChange", reset)
+if RINGS then
+addHook("GameQuit", reset)
+else -- sigh...
+addHook("PlayerJoin", function(p) if p == #consoleplayer then reset() end end)
+end
 
 local function SpawnDriftSparks(r, direction)
 	if leveltime % 2 == 1 then
