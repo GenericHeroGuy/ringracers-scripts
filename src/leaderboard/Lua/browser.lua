@@ -20,6 +20,7 @@ local getPortrait = lb_get_portrait
 -- lb_store.lua
 local GetMapRecords = lb_get_map_records
 local GetProfile = lb_get_profile
+local GetAlias = lb_get_alias
 local RecordName = lb_record_name
 
 -----------------------------
@@ -27,8 +28,22 @@ local RecordName = lb_record_name
 local RINGS = VERSION == 2
 local TURNING = RINGS and "turning" or "driftturn"
 local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
-local TOL_BATTLE = TOL_BATTLE or TOL_MATCH
 local BT_CUSTOM1 = BT_CUSTOM1 or 1<<13
+
+local TOLMASK = 0
+local function tol_t(tol, color, flag)
+	TOLMASK = $ | tol
+	return { tol = tol, fillcolor = color, textcolor = flag }
+end
+
+local TOLS = RINGS and {
+	tol_t(TOL_RACE,    132, V_SKYMAP),
+	tol_t(TOL_BATTLE,  34,  V_REDMAP),
+	tol_t(TOL_SPECIAL, 194, V_PURPLEMAP),
+} or {
+	tol_t(TOL_RACE,    214, V_SKYMAP),
+	tol_t(TOL_MATCH,   126, V_REDMAP),
+}
 
 local cv_showallstats = CV_RegisterVar({
 	name = "lb_showallstats",
@@ -46,6 +61,14 @@ end
 
 local function getMap(offset)
 	return maps[gtselect][mapIndexOffset(offset or 0)]
+end
+
+local function getTol(map)
+	local tol = map.typeoflevel & TOLMASK
+	for i, v in ipairs(TOLS) do
+		-- there can be only one
+		if tol == v.tol then return i end
+	end
 end
 
 local function updateModes()
@@ -82,9 +105,10 @@ local function loadMaps()
 	for i = 0, #mapheaderinfo do
 		local map = mapheaderinfo[i]
 		if map then
-			local tol = map.typeoflevel & (TOL_RACE|TOL_BATTLE)
-			if not (tol == TOL_RACE or tol == TOL_BATTLE) then continue end
-			if map.menuflags & LF2_HIDEINMENU then
+			local tol = getTol(map)
+			if not tol then
+				continue
+			elseif map.menuflags & LF2_HIDEINMENU then
 				if not hell[tol] then hell[tol] = {} end
 				table.insert(hell[tol], i)
 			else
@@ -151,10 +175,7 @@ local function drawEncore(v)
 	)
 end
 
-local colors = {
-	[0] = RINGS and 1 or 0, -- TIL indices 0-6 are brighter in 2.2
-	[1] = RINGS and 133 or 215
-}
+local FLASHCOL = not RINGS and 120 or 0
 local function drawMapBorder(v)
 	local mapWidth = FixedMul(160, FRACUNIT / scalar)
 	local mapHeight = FixedMul(100, FRACUNIT / scalar)
@@ -163,7 +184,7 @@ local function drawMapBorder(v)
 		mappY - mapHeight / 2 -1,
 		mapWidth + 2,
 		mapHeight + 2,
-		colors[leveltime / 4 % 2]
+		(leveltime / 4 % 2) and TOLS[gtselect].fillcolor or FLASHCOL
 	)
 end
 
@@ -176,7 +197,7 @@ local function drawMapStrings(v)
 		hlfScrnWdth,
 		ttlY,
 		map.lvlttl,
-		V_SKYMAP,
+		TOLS[gtselect].textcolor,
 		"center"
 	)
 
@@ -187,7 +208,7 @@ local function drawMapStrings(v)
 		hlfScrnWdth + titleWidth / 2,
 		ttlY + 8,
 		zone,
-		V_SKYMAP,
+		TOLS[gtselect].textcolor,
 		"right"
 	)
 
@@ -400,16 +421,12 @@ do
 	end
 end
 
-local colorFlags = {
-	[0] = V_SKYMAP,
-	[1] = 0
-}
-
 local function drawScore(v, i, pos, score, player)
 	local y = scoresY + i * 18
-	local textFlag = colorFlags[pos%2]
+	local textFlag = not (pos % 2) and TOLS[gtselect].textcolor or 0
 	local ofs = 0
 	local mypid = GetProfile(player)
+	local myalias = mypid and GetAlias(player.name, mypid)
 
 	-- position
 	drawNum(v, column[1], y, pos)
@@ -424,7 +441,9 @@ local function drawScore(v, i, pos, score, player)
 		if mypid == p.pid then
 			local chilip = v.cachePatch("K_CHILI"..leveltime/4%8+1)
 			v.draw(column[1], y, chilip)
-			textFlag = V_YELLOWMAP
+			if myalias == p.alias then
+				textFlag = V_YELLOWMAP
+			end
 		end
 
 		-- draw a tiny little dot so you know which player's name is being shown
@@ -484,7 +503,7 @@ local function initBrowser(modeSep)
 	if not maps then loadMaps() end
 
 	ModeSep = modeSep
-	gtselect = mapheaderinfo[gamemap].typeoflevel & (TOL_RACE|TOL_BATTLE)
+	gtselect = getTol(mapheaderinfo[gamemap])
 
 	-- set mapIndex to current map
 	for i, m in ipairs(maps[gtselect]) do
@@ -571,7 +590,7 @@ local function controller(player)
 				prefMode = modes[mode]
 			end
 		elseif cmd.buttons & BT_CUSTOM1 then
-			gtselect = gtselect == TOL_RACE and TOL_BATTLE or TOL_RACE
+			gtselect = ($ % #TOLS) + 1
 			updateMapIndex(0)
 		end
 	end

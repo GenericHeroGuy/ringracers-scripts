@@ -410,10 +410,10 @@ COM_AddCommand("findmap", function(player, search)
 	local hell = "\x85HELL"
 	local tol = RINGS and {
 		[TOL_RACE] = "\x88Race\x80",
-		[TOL_BATTLE] = "\x87\Battle\x80",
-		[TOL_SPECIAL] = "\x86Special\x80",
-		[TOL_VERSUS] = "\x85Versus\x80",
-		[TOL_TUTORIAL] = "\x84Tutorial\x80"
+		[TOL_BATTLE] = "\x85\Battle\x80",
+		[TOL_SPECIAL] = "\x81Special\x80",
+		[TOL_VERSUS] = "\x87Versus\x80",
+		[TOL_TUTORIAL] = "\x86Tutorial\x80"
 	} or {
 		[TOL_SP] = "\x81Race\x80", -- Nuked race maps
 		[TOL_COOP] = "\x8D\Battle\x80", -- Nuked battle maps
