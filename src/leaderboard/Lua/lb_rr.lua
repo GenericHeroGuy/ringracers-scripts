@@ -2,35 +2,14 @@
 -- ONLY FOR Dr Robotnik's Ring Racers(tm)
 if VERSION ~= 2 then return end
 
+---- Imported functions ----
+
+-- lb_common.lua
+local GetGametype = lb_get_gametype
+
+-----------------------------
+
 local BT_RESPAWN = 1<<6
-
-G_AddGametype({
-	name = "Leaderboard",
-	identifier = "LEADERBOARD",
-	rules = GTR_CIRCUIT|GTR_ENCORE
-	-- skip title card, also mutes lap sound, also hides freeplay for some reason
-	|GTR_SPECIALSTART
-	-- continuous music
-	|GTR_NOPOSITION,
-	typeoflevel = TOL_RACE,
-	speed = 2,
-	intermissiontype = 2,
-})
-
-G_AddGametype({
-	name = "Leaderbattle",
-	identifier = "LEADERBATTLE",
-	rules = GTR_SPHERES|GTR_BUMPERS|GTR_PAPERITEMS|GTR_POWERSTONES|GTR_KARMA|GTR_ITEMARROWS|GTR_PRISONS|GTR_BATTLESTARTS|GTR_POINTLIMIT|GTR_TIMELIMIT|GTR_OVERTIME|GTR_CLOSERPLAYERS
-	-- skip title card, also mutes lap sound, also hides freeplay for some reason
-	|GTR_SPECIALSTART
-	-- continuous music
-	|GTR_NOPOSITION,
-	typeoflevel = TOL_BATTLE,
-	speed = 0,
-	intermissiontype = 2,
-})
-
--- no GT_LEADERSPECIAL because G_SetCustomExitVars always switches to the default gametype
 
 local cv_ringboxes = CV_RegisterVar({
 	name = "lb_ringboxes",
@@ -41,8 +20,6 @@ local cv_ringboxes = CV_RegisterVar({
 
 local faultstart
 local fuseset
-
-local GAMETYPES = { [GT_LEADERBOARD] = true, [GT_LEADERBATTLE] = true, [GT_SPECIAL] = true }
 
 -- fault starts change their mapthing type to 0 after being processed
 -- so, sigh... here we go...
@@ -94,7 +71,7 @@ addHook("ThinkFrame", function()
 		end
 	end
 
-	if gametype == GT_LEADERBOARD or gametype == GT_LEADERBATTLE then
+	if starttime then
 		for p in players.iterate do
 			if leveltime < starttime and p.rings <= 0 then
 				-- if only instawhipchargelockout was exposed
@@ -133,7 +110,7 @@ addHook("PlayerSpawn", function(p)
 		end
 	end
 
-	if GAMETYPES[gametype] and not p.spectator then
+	if GetGametype() and not p.spectator then
 		if gametype == GT_LEADERBOARD then p.rings = 20 end
 		if faultstart ~= true then
 			local fx, fy, fz = faultstart.x<<FRACBITS, faultstart.y<<FRACBITS, faultstart.z<<FRACBITS
@@ -151,7 +128,7 @@ addHook("PlayerSpawn", function(p)
 end)
 
 addHook("PreThinkFrame", function()
-	if GAMETYPES[gametype] then
+	if GetGametype() then
 		for p in players.iterate do
 			local old = oldrings[p]
 			if not old then
@@ -167,7 +144,7 @@ end)
 
 addHook("PlayerThink", function(p)
 	-- do NOT check LB_IsRunning so this works in replays
-	if p.spectator or not GAMETYPES[gametype] then return end
+	if p.spectator or not GetGametype() then return end
 
 	local old = oldrings[p]
 	if cv_ringboxes.value == 2 -- TA mode ringboxes

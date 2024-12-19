@@ -7,6 +7,7 @@ local mode = 1
 local prefMode = nil
 local ModeSep
 local gtselect
+local gttable
 
 ---- Imported functions ----
 
@@ -16,6 +17,8 @@ local TicsToTime = lb_TicsToTime
 local drawNum = lb_draw_num
 local getThrowDir = lb_throw_dir
 local getPortrait = lb_get_portrait
+local GametypeForMap = lb_gametype_for_map
+local NextGametype = lb_next_gametype
 
 -- lb_store.lua
 local GetMapRecords = lb_get_map_records
@@ -63,14 +66,6 @@ local function getMap(offset)
 	return maps[gtselect][mapIndexOffset(offset or 0)]
 end
 
-local function getTol(map)
-	local tol = map.typeoflevel & TOLMASK
-	for i, v in ipairs(TOLS) do
-		-- there can be only one
-		if tol == v.tol then return i end
-	end
-end
-
 local function updateModes()
 	-- set available modes for this map
 	modes = {}
@@ -102,26 +97,19 @@ end
 local function loadMaps()
 	maps = {}
 	local hell = {}
-	for i = 0, #mapheaderinfo do
-		local map = mapheaderinfo[i]
-		if map then
-			local tol = getTol(map)
-			if not tol then
-				continue
-			elseif map.menuflags & LF2_HIDEINMENU then
-				if not hell[tol] then hell[tol] = {} end
-				table.insert(hell[tol], i)
-			else
-				if not maps[tol] then maps[tol] = {} end
-				table.insert(maps[tol], i)
-			end
+	for i = 0, #mapheaderinfo - 1 do
+		local gtab, gti = GametypeForMap(i)
+		if gtab and gtab.enabled then
+			local t = mapheaderinfo[i].menuflags & LF2_HIDEINMENU and hell or maps
+			if not t[gti] then t[gti] = {} end
+			table.insert(t[gti], i)
 		end
 	end
 
 	-- append hell maps
-	for tol, set in pairs(hell) do
+	for gti, set in pairs(hell) do
 		for _, map in ipairs(set) do
-			table.insert(maps[tol], map)
+			table.insert(maps[gti], map)
 		end
 	end
 end
@@ -184,7 +172,7 @@ local function drawMapBorder(v)
 		mappY - mapHeight / 2 -1,
 		mapWidth + 2,
 		mapHeight + 2,
-		(leveltime / 4 % 2) and TOLS[gtselect].fillcolor or FLASHCOL
+		(leveltime / 4 % 2) and gttable.fillcolor or FLASHCOL
 	)
 end
 
@@ -197,7 +185,7 @@ local function drawMapStrings(v)
 		hlfScrnWdth,
 		ttlY,
 		map.lvlttl,
-		TOLS[gtselect].textcolor,
+		gttable.textcolor,
 		"center"
 	)
 
@@ -208,7 +196,7 @@ local function drawMapStrings(v)
 		hlfScrnWdth + titleWidth / 2,
 		ttlY + 8,
 		zone,
-		TOLS[gtselect].textcolor,
+		gttable.textcolor,
 		"right"
 	)
 
@@ -423,7 +411,7 @@ end
 
 local function drawScore(v, i, pos, score, player)
 	local y = scoresY + i * 18
-	local textFlag = not (pos % 2) and TOLS[gtselect].textcolor or 0
+	local textFlag = not (pos % 2) and gttable.textcolor or 0
 	local ofs = 0
 	local mypid = GetProfile(player)
 	local myalias = mypid and GetAlias(player.name, mypid)
@@ -503,7 +491,10 @@ local function initBrowser(modeSep)
 	if not maps then loadMaps() end
 
 	ModeSep = modeSep
-	gtselect = getTol(mapheaderinfo[gamemap])
+	gttable, gtselect = GametypeForMap(gamemap)
+	if not gttable.enabled then
+		gttable, gtselect = NextGametype($2)
+	end
 
 	-- set mapIndex to current map
 	for i, m in ipairs(maps[gtselect]) do
@@ -544,6 +535,7 @@ local ValidButtons = BT_ACCELERATE | BT_BRAKE | BT_DRIFT | BT_ATTACK | BT_CUSTOM
 -- return value indicates we want to exit the browser
 local function controller(player)
 	-- mid-game join
+	if not gttable then gttable = NextGametype(gtselect - 1) end
 	if not maps then loadMaps() end
 	if not MapRecords then MapRecords = GetMapRecords(getMap(), ModeSep) end
 	if not modes then updateModes() end
@@ -590,7 +582,7 @@ local function controller(player)
 				prefMode = modes[mode]
 			end
 		elseif cmd.buttons & BT_CUSTOM1 then
-			gtselect = ($ % #TOLS) + 1
+			gttable, gtselect = NextGametype($2)
 			updateMapIndex(0)
 		end
 	end
@@ -603,5 +595,6 @@ local function netvars(net)
 	prefMode = net($)
 	scrollPos = net($)
 	ModeSep = net($)
+	gtselect = net($)
 end
 addHook("NetVars", netvars)

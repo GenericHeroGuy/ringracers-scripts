@@ -77,6 +77,86 @@ rawset(_G, "lb_flag_encore", 0x80)
 local F_SPBBIG = lb_flag_spbbig
 local F_SPBEXP = lb_flag_spbexp
 
+local GAMETYPES = {}
+local function gametype_t(name, gt, tol, text, fill, item, start)
+	local gtab = {
+		enabled = true,
+		name = name,
+		gametype = gt,
+		typeoflevel = tol,
+		textcolor = text,
+		fillcolor = fill,
+		itempatch = item,
+		starttime = start,
+	}
+	CV_RegisterVar({
+		name = "lb_gt_"..name:lower(),
+		defaultvalue = "On",
+		flags = CV_NETVAR | CV_CALL,
+		PossibleValue = CV_OnOff,
+		func = function(cv)
+			gtab.enabled = cv.value
+		end
+	})
+	table.insert(GAMETYPES, gtab)
+end
+
+if RINGS then
+-- GTR_SPECIALSTART: skip title card, also mutes lap sound, also hides freeplay for some reason
+-- GTR_NOPOSITION:   continuous music
+G_AddGametype({
+	"Leaderboard",
+	"LEADERBOARD",
+	GTR_CIRCUIT|GTR_ENCORE|GTR_SPECIALSTART|GTR_NOPOSITION,
+	TOL_RACE,
+	2,
+	speed = 2,
+})
+G_AddGametype({
+	"Leaderbattle",
+	"LEADERBATTLE",
+	GTR_SPHERES|GTR_BUMPERS|GTR_PAPERITEMS|GTR_POWERSTONES|GTR_KARMA|GTR_ITEMARROWS|GTR_PRISONS|GTR_BATTLESTARTS|GTR_POINTLIMIT|GTR_TIMELIMIT|GTR_OVERTIME|GTR_CLOSERPLAYERS|GTR_SPECIALSTART|GTR_NOPOSITION,
+	TOL_BATTLE,
+	2,
+	speed = 0,
+})
+-- no GT_LEADERSPECIAL because G_SetCustomExitVars always switches to the default gametype
+
+gametype_t("Race",    GT_LEADERBOARD,  TOL_RACE,    V_SKYMAP,    132, "K_ISSHOE", 15*TICRATE)
+gametype_t("Battle",  GT_LEADERBATTLE, TOL_BATTLE,  V_REDMAP,    34,  "K_ISGBOM", 5*TICRATE + TICRATE/2)
+gametype_t("Special", GT_SPECIAL,      TOL_SPECIAL, V_PURPLEMAP, 194, "K_ISSHOE", 0)
+else
+gametype_t("Race",   GT_RACE,  TOL_RACE|TOL_SP,    V_SKYMAP, 214, "K_ISSHOE", 6*TICRATE + 3*TICRATE/4)
+gametype_t("Battle", GT_MATCH, TOL_MATCH|TOL_COOP, V_REDMAP, 126, "K_ISPOGO", 6*TICRATE + 3*TICRATE/4)
+end
+
+rawset(_G, "lb_gametype_for_map", function(mapnum)
+	local header = mapheaderinfo[mapnum]
+	if not header then return end
+	local tol = header.typeoflevel
+	for i, gtab in ipairs(GAMETYPES) do
+		if tol & gtab.typeoflevel then
+			return gtab, i
+		end
+	end
+end)
+
+rawset(_G, "lb_get_gametype", function()
+	local gt = gametype
+	for i, gtab in ipairs(GAMETYPES) do
+		if gtab.gametype == gt then return gtab, i end
+	end
+end)
+
+rawset(_G, "lb_next_gametype", function(i)
+	local start = i
+	repeat
+		i = (i % #GAMETYPES) + 1
+		local gtab = GAMETYPES[i]
+		if gtab.enabled then return gtab, i end
+	until i == start
+end)
+
 -- True if a is better than b
 rawset(_G, "lb_comp", function(a, b)
 	-- Calculates the difficulty, harder has higher priority

@@ -7,6 +7,7 @@ local StringReader = lb_string_reader
 local StringWriter = lb_string_writer
 local getThrowDir = lb_throw_dir
 local ghost_t = lb_ghost_t
+local GetGametype = lb_get_gametype
 
 -- lb_store.lua
 local ReadGhost = lb_read_ghost
@@ -1984,11 +1985,12 @@ hud.add(function(v, p)
 	end
 
 	-- item or ringbox
+	local itempatch = v.cachePatch(GetGametype().itempatch)
 	if gw.hasitem == 1 then
 		flags = ($ & ~V_HUDTRANS) | V_HUDTRANSHALF
-		v.draw(95, 142, v.cachePatch("K_ISSHOE"), flags, v.getColormap(TC_RAINBOW, gw.mo.color))
+		v.draw(95, 142, itempatch, flags, v.getColormap(TC_RAINBOW, gw.mo.color))
 	elseif gw.hasitem >= 2 then
-		v.draw(95, 142, v.cachePatch(not RINGS and gametype == GT_MATCH and "K_ISPOGO" or "K_ISSHOE"), flags)
+		v.draw(95, 142, itempatch, flags)
 		if gw.hasitem > 2 then
 			v.drawString(128, 142, gw.hasitem - 1, flags, "right")
 		end

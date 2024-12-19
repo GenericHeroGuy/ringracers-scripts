@@ -18,6 +18,8 @@ local ghost_t = lb_ghost_t
 local mapNameAndSum = lb_mapname_and_checksum
 local getPortrait = lb_get_portrait
 local isSameRecord = lb_is_same_record
+local GametypeForMap = lb_gametype_for_map
+local GetGametype = lb_get_gametype
 
 -- browser.lua
 local InitBrowser = InitBrowser
@@ -77,13 +79,6 @@ local StartTime = 0
 local musicchanged = false
 local hudtime = 0
 local gotEmerald
-
-
-local GAMETYPES = RINGS and {
-	[GT_LEADERBOARD] = true,
-	[GT_LEADERBATTLE] = true,
-	[GT_SPECIAL] = true,
-}
 
 -- Text flash on finish
 local FlashTics = 0
@@ -330,24 +325,20 @@ local function initLeaderboard(player)
 	else
 		disable = disable or not canstart()
 	end
-	local tol, gt = mapheaderinfo[gamemap].typeoflevel
-	if RINGS then
-		gt = tol & TOL_BATTLE and GT_LEADERBATTLE or tol & TOL_SPECIAL and GT_SPECIAL or GT_LEADERBOARD
-	else
-		gt = tol & TOL_MATCH and GT_MATCH or GT_RACE
+	local gtab = GametypeForMap(gamemap)
+	disable = $ or not cv_enable.value or not (gtab and gtab.enabled)
+
+	-- if disabled by gametype, restart with the correct gametype
+	local gtdisable = not gtab or gametype ~= gtab.gametype
+	if RINGS and not disable and gtdisable then
+		nextMap = gamemap
 	end
-	local gtdisable = disable or not cv_enable.value
-	disable = $ or not cv_enable.value or gametype ~= gt
+	disable = $ or gtdisable
 
 	-- Restore encore mode to initial value
 	if disable and EncoreInitial != nil then
 		COM_BufInsertText(server, string.format(RINGS and "encore %d" or "kartencore %d", EncoreInitial))
 		EncoreInitial = nil
-	end
-
-	-- if disabled by gametype, restart with the correct gametype
-	if RINGS and not gtdisable and not GAMETYPES[gametype] then
-		nextMap = gamemap
 	end
 
 	player.afkTime = leveltime
@@ -593,6 +584,15 @@ COM_AddCommand("changelevel", function(player, ...)
 
 	if mapheaderinfo[mapnum] == nil then
 		CONS_Printf(player, ("Map doesn't exist: %s"):format(search))
+		return
+	end
+
+	local gtab = GametypeForMap(mapnum)
+	if not gtab then
+		CONS_Printf(player, ("Incompatible gametype: %s"):format(search))
+		return
+	elseif not gtab.enabled then
+		CONS_Printf(player, ("Gametype %s has been disabled by the server."):format(gtab.name))
 		return
 	end
 
@@ -855,10 +855,6 @@ COM_AddCommand("lb_delete", function(player, from)
 	)
 end, COM_ADMIN)
 
-local STARTTIMES = RINGS and {
-	[GT_LEADERBOARD] = 15*TICRATE,
-	[GT_LEADERBATTLE] = 5*TICRATE + TICRATE/2,
-}
 local ghostQueue = {}
 addHook("MapLoad", function()
 	TimeFinished = 0
@@ -870,11 +866,8 @@ addHook("MapLoad", function()
 	scrollAcc = 0
 	FlashTics = 0
 	ghostQueue = {}
-	if RINGS then
-		StartTime = STARTTIMES[gametype] or 0
-	else
-		StartTime = 6*TICRATE + (3*TICRATE/4)
-	end
+	local gtab = GetGametype()
+	StartTime = gtab and gtab.starttime or 0
 
 	allowJoin(true)
 
@@ -1583,12 +1576,9 @@ end, MT_SPECIAL_UFO)
 end
 
 local function changeMap()
-	local gt = RINGS and GT_LEADERBOARD or GT_RACE
-	if mapheaderinfo[nextMap].typeoflevel & (RINGS and TOL_BATTLE or TOL_MATCH) then
-		gt = (RINGS and GT_LEADERBATTLE or GT_MATCH)
-	end
-	if RINGS and mapheaderinfo[nextMap].typeoflevel & TOL_SPECIAL then
-		if nextMap == gamemap then
+	local gtab = GametypeForMap(nextMap)
+	if RINGS and gtab.gametype == GT_SPECIAL then
+		if nextMap == gamemap and gametype == gtab.gametype then
 			COM_BufInsertText(server, "restartlevel")
 		elseif gamestate ~= GS_LEVEL then
 			-- great... can't use G_SetCustomExitVars in intermission
@@ -1599,7 +1589,7 @@ local function changeMap()
 			COM_BufInsertText(server, "exitlevel")
 		end
 	else
-		COM_BufInsertText(server, ("map %d -g %d"):format(nextMap, gt))
+		COM_BufInsertText(server, ("map %d -g %d"):format(nextMap, gtab.gametype))
 	end
 	nextMap = nil
 end
@@ -1653,7 +1643,7 @@ local function think()
 			minirankings = true
 		end
 		-- don't use our broken gametypes in normal races!
-		if RINGS and GAMETYPES[gametype] and not replayplayback then
+		if RINGS and GetGametype() and not replayplayback then
 			local map = gametype == GT_SPECIAL and 2 or gamemap -- i am NOT warping back to sealed stars
 			local gt = mapheaderinfo[map].typeoflevel & TOL_BATTLE and GT_BATTLE or GT_RACE
 			COM_BufInsertText(server, ("map %d -g %d -f"):format(map, gt))
