@@ -11,7 +11,7 @@ end)
 
 rawset(_G, "lb_targets_left", function() return targetsleft end)
 
-if VERSION == 2 then
+if CODEBASE >= 220 then
 -- Ring Racers already has prison break. just keep count of the targets
 addHook("PlayerSpawn", function(p)
 	if gametype ~= GT_LEADERBATTLE or targetlist then return end
@@ -31,7 +31,7 @@ addHook("MobjDeath", hitem, MT_CDUFO)
 
 -- that's all we need!
 return
-end -- if VERSION == 2
+end -- if CODEBASE >= 220
 
 addHook("PlayerSpawn", function(p)
 	if not LB_IsRunning() or gametype ~= GT_MATCH then

@@ -16,7 +16,7 @@ local RecordName = lb_record_name
 
 -----------------------------
 
-local RINGS = VERSION == 2
+local RINGS = CODEBASE >= 220
 local BT_CUSTOM1 = RINGS and 1<<13 or BT_CUSTOM1
 local BT_CUSTOM2 = RINGS and 1<<14 or BT_CUSTOM2
 local BT_CUSTOM3 = RINGS and 1<<15 or BT_CUSTOM3

@@ -1,6 +1,6 @@
 -- LEADERBOARD RR STUFF (formerly online TA)
 -- ONLY FOR Dr Robotnik's Ring Racers(tm)
-if VERSION ~= 2 then return end
+if CODEBASE < 220 then return end
 
 ---- Imported functions ----
 

@@ -92,7 +92,7 @@ local cv_droptest = CV_RegisterVar({
 	possiblevalue = CV_Unsigned
 })
 
-local cv_filetransfer = VERSION == 2 and CV_RegisterVar({
+local cv_filetransfer = CODEBASE >= 220 and CV_RegisterVar({
 	name = "lb_net_filetransfer",
 	defaultvalue = "On",
 	possiblevalue = CV_OnOff

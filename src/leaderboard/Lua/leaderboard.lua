@@ -57,7 +57,7 @@ local DrawTargets = lb_draw_targets
 
 --------------------------------------------
 
-local RINGS = VERSION == 2
+local RINGS = CODEBASE >= 220
 local TURNING = RINGS and "turning" or "driftturn"
 local RACETOL = RINGS and TOL_RACE or TOL_RACE | TOL_SP
 local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0

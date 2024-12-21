@@ -18,7 +18,7 @@ local isSameRecord = lb_is_same_record
 
 ----------------------------
 
-local RINGS = VERSION == 2
+local RINGS = CODEBASE >= 220
 local open = RINGS and function(path, mode) return io.openlocal("client/"..path, mode) end or io.open
 
 local LEADERBOARD_VERSION = 3

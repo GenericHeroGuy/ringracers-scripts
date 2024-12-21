@@ -28,7 +28,7 @@ local RecordName = lb_record_name
 
 -----------------------------
 
-local RINGS = VERSION == 2
+local RINGS = CODEBASE >= 220
 local TURNING = RINGS and "turning" or "driftturn"
 local V_ALLOWLOWERCASE = V_ALLOWLOWERCASE or 0
 local BT_CUSTOM1 = BT_CUSTOM1 or 1<<13

@@ -1,4 +1,4 @@
-local RINGS = VERSION == 2
+local RINGS = CODEBASE >= 220
 
 rawset(_G, "lb_score_t", function(flags, time, starttime, splits, players, id)
 	return {
