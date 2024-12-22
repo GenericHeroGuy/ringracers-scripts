@@ -46,8 +46,9 @@ local cv_directory = CV_RegisterVar({
 	end
 })
 
--- Livestore are new records nad records loaded from leaderboard.txt file
-local LiveStore
+-- two methods of addressing records: IDs and map numbers
+-- RecByMap is a cache generated with RecByID
+local RecByID, RecByMap
 
 -- name of loaded store
 local StoreName
@@ -64,21 +65,50 @@ local Profiles
 -- dirty player profiles :flushed:
 local DirtyProfs
 
--- insert or replace the score in dest
--- returns true if inserted, false if (maybe) replaced
-local function insertOrReplace(dest, score, modeSep)
-	for i, record in ipairs(dest) do
-		if isSameRecord(record, score, modeSep) then
-			if lbComp(score, record) then
-				dest[i] = score
-				score.id = record.id
+local function makeMapCache(store)
+	local mapstore = {}
+	for id, record in pairs(store) do
+		if not mapstore[record._map] then
+			mapstore[record._map] = {}
+		end
+		if not mapstore[record._map][record._checksum] then
+			mapstore[record._map][record._checksum] = {}
+		end
+		table.insert(mapstore[record._map][record._checksum], record)
+	end
+	return mapstore
+end
+
+local function refreshMapCache()
+	if not RecByMap then
+		RecByMap = makeMapCache(RecByID)
+	end
+end
+
+local function recordsForMap(mapname, checksum)
+	refreshMapCache()
+	return RecByMap[mapname] and RecByMap[mapname][checksum]
+end
+
+-- try to replace an existing record in a map
+-- return true if record was (maybe?) replaced
+local function replaceRecord(score, modeSep)
+	local dest = recordsForMap(score._map, score._checksum)
+	if dest then
+		for _, record in ipairs(dest) do
+			if isSameRecord(record, score, modeSep) then
+				if lbComp(score, record) then
+					-- no dupes when moving, thanks
+					if score.id then RecByID[score.id] = nil end
+
+					RecByID[record.id] = score
+					score.id = record.id
+				end
+				return true
 			end
-			return false
 		end
 	end
-
-	table.insert(dest, score)
-	return true
+	return false
 end
 
 local function postfix(filename, str)
@@ -152,8 +182,9 @@ local function writeCount(f, table)
 end
 
 local function writeMapStore(f, store)
-	writeCount(f, store)
-	for map, checksums in pairs(store) do
+	local mapstore = makeMapCache(store)
+	writeCount(f, mapstore)
+	for map, checksums in pairs(mapstore) do
 		f:writestr(G_BuildMapName(map))
 		writeCount(f, checksums)
 		for checksum, records in pairs(checksums) do
@@ -242,18 +273,14 @@ end
 
 -- delete unused profiles and aliases
 local function cleanprofiles()
-	if not (isserver and LiveStore and Profiles) then return end
+	if not (isserver and RecByID and Profiles) then return end
 
 	-- pass 1: get status of all profiles/aliases
 	local seen = {}
-	for map, checksums in pairs(LiveStore) do
-		for checksum, records in pairs(checksums)
-			for _, record in ipairs(records) do
-				for _, p in ipairs(record.players) do
-					seen[p.pid] = $ or {}
-					seen[p.pid][p.alias] = true
-				end
-			end
+	for id, record in pairs(RecByID) do
+		for _, p in ipairs(record.players) do
+			seen[p.pid] = $ or {}
+			seen[p.pid][p.alias] = true
 		end
 	end
 
@@ -317,14 +344,10 @@ local function cleanprofiles()
 	--]]
 
 	-- pass 3: translate to new IDs in the store
-	for map, checksums in pairs(LiveStore) do
-		for checksum, records in pairs(checksums)
-			for _, record in ipairs(records) do
-				for _, p in ipairs(record.players) do
-					p.alias = aliastrans[p.pid][$]
-					p.pid = pidtrans[$]
-				end
-			end
+	for id, record in pairs(RecByID) do
+		for _, p in ipairs(record.players) do
+			p.alias = aliastrans[p.pid][$]
+			p.pid = pidtrans[$]
 		end
 	end
 end
@@ -355,7 +378,7 @@ local function dumpStoreToFile()
 	end
 
 	writeProfiles(f, Profiles, false)
-	writeMapStore(f, LiveStore)
+	writeMapStore(f, RecByID)
 
 	write_segmented(string.format("Leaderboard/%s/store.sav2", StoreName), table.concat(f))
 end
@@ -373,72 +396,31 @@ local function recordsIdentical(a, b)
 end
 
 local function mergeStore(other, deletelist, othernext)
-	-- first, get the IDs of all records in here
-	local my_mapforid = {}
-	for map, checksums in pairs(LiveStore) do
-		for checksum, records in pairs(checksums)
-			for i, record in ipairs(records) do
-				my_mapforid[record.id] = { map = map, rec = record, checksum = checksum, i = i }
-			end
-		end
-	end
-	local other_mapforid = {}
-	for map, checksums in pairs(other) do
-		for checksum, records in pairs(checksums) do
-			for i, record in ipairs(records) do
-				other_mapforid[record.id] = { map = map, rec = record, checksum = checksum }
-			end
-		end
-	end
-
-	local gaps = {} -- which maps might have gaps
-
 	-- check the ids of the other store's records to see if anything moved
 	for id = 1, max(NextID, othernext) do
-		local my, ot = my_mapforid[id], other_mapforid[id]
+		local my, ot = RecByID[id], other[id]
 		if not ot or deletelist[id] then
 			-- server doesn't have record anymore
-			if my then
-				LiveStore[my.map][my.checksum][my.i] = false
-			end
+			RecByID[id] = nil
 			--print(string.format("delete %d", id))
 		elseif not my and ot then
 			-- server has a record we don't have
-			if not LiveStore[ot.map] then LiveStore[ot.map] = {} end
-			if not LiveStore[ot.map][ot.checksum] then LiveStore[ot.map][ot.checksum] = {} end
-			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
-			--print(string.format("add %d %d", ot.map, id))
-		elseif my and ot and (not recordsIdentical(my.rec, ot.rec) or my.map ~= ot.map or my.checksum ~= ot.checksum) then
+			RecByID[id] = ot
+			--print(string.format("add %d %d", ot._map, id))
+		elseif my and ot and (not recordsIdentical(my, ot) or my._map ~= ot._map or my._checksum ~= ot._checksum) then
 			-- replace our record with the server's, wiping the ghost
-			LiveStore[my.map][my.checksum][my.i] = false
-			if not LiveStore[ot.map] then LiveStore[ot.map] = {} end
-			if not LiveStore[ot.map][ot.checksum] then LiveStore[ot.map][ot.checksum] = {} end
-			table.insert(LiveStore[ot.map][ot.checksum], ot.rec)
-			--print(string.format("overwrite %d %d", my.map, id))
+			RecByID[id] = ot
+			--print(string.format("overwrite %d %d", my._map, id))
 		else
-			--print(string.format("passthrough %d %d", ot.map, id))
+			--print(string.format("passthrough %d %d", ot._map, id))
 			continue
 		end
 		-- if we didn't continue, something's changed. wipe the ghosts
-		if my then gaps[my.map] = true; deleteGhost(id) end
-		if ot then gaps[ot.map] = true; deleteGhost(id) end
+		deleteGhost(id)
 	end
 
-	for map in pairs(gaps) do
-		-- delete the gaps
-		for checksum, records in pairs(LiveStore[map]) do
-			for i = #records, 1, -1 do
-				if not records[i] then
-					table.remove(records, i)
-				end
-			end
-			-- no records? delete the table to save space
-			if not next(records) then
-				LiveStore[map][checksum] = nil
-			end
-		end
-	end
 	Dirty = {} -- you won't be needing this anymore
+	RecByMap = nil
 	dumpStoreToFile()
 end
 
@@ -446,10 +428,9 @@ end
 -- Returns a list of all maps with records
 local function MapList()
 	local maplist = {}
-	for mapid, checksums in pairs(LiveStore) do
-		if next(checksums) then
-			table.insert(maplist, mapid)
-		end
+	refreshMapCache()
+	for mapid, checksums in pairs(RecByMap) do
+		table.insert(maplist, mapid)
 	end
 	table.sort(maplist)
 
@@ -461,9 +442,9 @@ rawset(_G, "lb_map_list", MapList)
 -- Construct the leaderboard table of the supplied mapid
 local function GetMapRecords(map, modeSep, checksum)
 	local mapRecords = {}
-	if not LiveStore then return mapRecords end
+	if not RecByID then return mapRecords end
 
-	local store = LiveStore[map] and LiveStore[map][checksum or mapChecksum(map)]
+	local store = recordsForMap(map, checksum or mapChecksum(map))
 	if not store then return mapRecords end
 
 	for _, record in ipairs(store) do
@@ -485,19 +466,21 @@ rawset(_G, "lb_get_map_records", GetMapRecords)
 -- Save a record to the LiveStore and write to disk
 -- SaveRecord will replace the record holders previous record
 local function SaveRecord(score, map, modeSep, ghosts)
-	if not LiveStore then
+	if not RecByID then
 		-- TODO perhaps a more prominent warning that nothing's being saved
 		print("Can't save records, please set a server directory! (lb_directory)")
 		return
 	end
-	LiveStore[map] = $ or {}
-	LiveStore[map][mapChecksum(map)] = $ or {}
-	local store = LiveStore[map][mapChecksum(map)]
-	local inserted = insertOrReplace(store, score, modeSep)
-	if inserted then
+	score._map = map
+	score._checksum = mapChecksum(map)
+
+	if not replaceRecord(score, modeSep) then
 		score.id = NextID
+		RecByID[NextID] = score
 		NextID = $ + 1
 	end
+
+	RecByMap = nil -- TODO just cause of one record???
 
 	print("Saving score ("..score.id..")")
 	if isserver then
@@ -674,17 +657,16 @@ end
 local function loadMapStore(f, version)
 	local store = {}
 	for _ = 1, f:readnum() do
-		local mapnum = mapnumFromExtended(f:readstr())
+		local mapnum = mapnumFromExtended(f:readstr()) -- TODO the root of all evil
 		local numchecksums = f:readnum()
-		local checksums = {}
-		store[mapnum] = checksums
 		for i = 1, numchecksums do
-			local checksum = string.format("%04x", f:read16())
+			local checksum = ("%04x"):format(f:read16())
 			local numrecords = f:readnum()
-			local scores = {}
-			checksums[checksum] = scores
 			for j = 1, numrecords do
-				table.insert(scores, parseScoreBinary(f, version))
+				local score = parseScoreBinary(f, version)
+				score._map = mapnum
+				score._checksum = checksum
+				store[score.id] = score
 			end
 		end
 	end
@@ -724,7 +706,8 @@ end
 local function loadStoreFile(directory)
 	print("Loading store "..directory)
 	StoreName = directory
-	LiveStore = {}
+	RecByID = {}
+	RecByMap = nil
 	Dirty = {}
 	NextID = 1
 	Profiles = {}
@@ -756,37 +739,20 @@ local function loadStoreFile(directory)
 		Profiles = loadProfiles(f, false)
 	end
 
-	LiveStore = loadMapStore(f, version)
+	RecByID = loadMapStore(f, version)
 
 	if version < 3 then -- convert names to profiles?
-		for map, checksums in pairs(LiveStore) do
-			for checksum, records in pairs(checksums) do
-				for _, record in ipairs(records) do
-					for _, p in ipairs(record.players) do
-						local fakep = { name = p.alias }
-						p.pid = getProfile(fakep) or newProfile(fakep)
-						p.alias = 1
-					end
-				end
+		for id, record in pairs(RecByID) do
+			for _, p in ipairs(record.players) do
+				local fakep = { name = p.alias }
+				p.pid = getProfile(fakep) or newProfile(fakep)
+				p.alias = 1
 			end
 		end
 	end
 
 	cleanprofiles()
 	clearcache()
-end
-
-local function squishStore(store)
-	for map, checksums in pairs(store) do
-		for checksum, records in pairs(checksums) do
-			if not next(records) then
-				store[map][checksum] = nil
-			end
-		end
-		if not next(checksums) then
-			store[map] = nil
-		end
-	end
 end
 
 local coldloaded
@@ -800,27 +766,19 @@ local function AddColdStoreBinary(str)
 end
 rawset(_G, "lb_add_coldstore_binary", AddColdStoreBinary)
 
--- yikes... that's a whole lot of pairs...
 local function getRecordByID(id)
-	for map, checksums in pairs(LiveStore) do
-		for checksum, records in pairs(checksums) do
-			for _, record in ipairs(records) do
-				if record.id == id then
-					return record, map, checksum
-				end
-			end
-		end
-	end
+	local record = RecByID[id]
+	return record, record._map, record._checksum
 end
 rawset(_G, "lb_rec_by_id", getRecordByID)
 
 local function getIdsForMap(map, checksum)
 	local ret = {}
-	if not (LiveStore[map] and LiveStore[map][checksum]) then
-		return ret
-	end
-	for _, record in ipairs(LiveStore[map][checksum]) do
-		ret[record.id] = true
+	local store = recordsForMap(map, checksum)
+	if store then
+		for _, record in ipairs(store) do
+			ret[record.id] = true
+		end
 	end
 	return ret
 end
@@ -830,36 +788,32 @@ rawset(_G, "lb_ids_for_map", getIdsForMap)
 -- Command for moving records from one map to another
 -- if targetmap is -1, deletes records
 local function moveRecords(sourcemap, sourcesum, sourceids, targetmap, targetsum, modeSep)
-	if not (LiveStore[sourcemap] and LiveStore[sourcemap][sourcesum]) then
+	local store = recordsForMap(sourcemap, sourcesum)
+	if not store then
 		return 0
 	end
 
 	local delete = targetmap == -1
 
-	if not delete then
-		LiveStore[targetmap] = $ or {}
-		LiveStore[targetmap][targetsum] = $ or {}
-	end
 	local moved = 0
-	for i, score in ipairs(LiveStore[sourcemap][sourcesum]) do
+	for _, score in ipairs(store) do
 		if not sourceids[score.id] then continue end
 		if isserver then Dirty[score.id] = true end
-		if not delete then insertOrReplace(LiveStore[targetmap][targetsum], score, modeSep) end
+		deleteGhost(score.id)
+		if delete then
+			RecByID[score.id] = nil
+		else
+			score._map = targetmap
+			score._checksum = targetsum
+			if replaceRecord(score, modeSep) then
+				-- replaced id should be dirty too
+				if isserver then Dirty[score.id] = true end
+			end
+		end
 		moved = $ + 1
 	end
 
-	-- Destroy the original table
-	local records = LiveStore[sourcemap][sourcesum]
-	for i = #records, 1, -1 do
-		local rec = records[i]
-		if sourceids[rec.id] then
-			table.remove(records, i)
-			deleteGhost(rec.id)
-		end
-	end
-	if not next(records) then
-		LiveStore[sourcemap][sourcesum] = nil
-	end
+	RecByMap = nil
 
 	cleanprofiles()
 	if isserver then
@@ -872,30 +826,13 @@ end
 rawset(_G, "lb_move_records", moveRecords)
 
 -- if we've got a coldstore loaded, apply the server's diff onto it
-local function applyColdStore(diff, diffprof)
+local function applyDiff(diff, diffprof)
 	local coldstore, directory, coldprofs = loadColdStore(StringReader(coldloaded))
 	if directory ~= StoreName then
 		return diff, coldprofs
 	end
-	for map, checksums in pairs(diff) do
-		if not coldstore[map] then coldstore[map] = {} end
-		for checksum, records in pairs(checksums) do
-			if not coldstore[map][checksum] then coldstore[map][checksum] = {} end
-			for _, record in ipairs(records) do
-				local target
-				for i, rec2 in ipairs(coldstore[map][checksum]) do
-					if rec2.id == record.id then
-						target = i
-						break
-					end
-				end
-				if target then
-					coldstore[map][checksum][target] = record
-				else
-					table.insert(coldstore[map][checksum], record)
-				end
-			end
-		end
+	for id, record in pairs(diff) do
+		coldstore[id] = record
 	end
 	for i, prof in pairs(diffprof) do
 		if #prof.aliases then
@@ -907,25 +844,17 @@ end
 
 -- makes a diff to send to clients, and saves it
 local function makecache()
-	if diffcache and deletecache or not (isserver and LiveStore) then
+	if diffcache and deletecache or not (isserver and RecByID) then
 		return
 	end
 
 	local send = {}
 	local highest = 0
-	local byid = {}
-	for map, checksums in pairs(LiveStore) do
-		send[map] = {}
-		for checksum, records in pairs(checksums) do
-			send[map][checksum] = {}
-			for _, record in ipairs(records) do
-				if Dirty[record.id] then
-					table.insert(send[map][checksum], record)
-				end
-				byid[record.id] = record
-				highest = max($, record.id)
-			end
+	for id, record in pairs(RecByID) do
+		if Dirty[id] then
+			send[id] = record
 		end
+		highest = max($, id)
 	end
 	-- need this in case the very latest records are deleted
 	for i in pairs(Dirty) do
@@ -939,12 +868,11 @@ local function makecache()
 
 	local deleted = StringWriter()
 	for i = 1, highest do
-		if not byid[i] then
+		if not send[i] and Dirty[i] then
 			deleted:writenum(i)
 		end
 	end
 
-	squishStore(send)
 	diffcache, deletecache = writeColdStore(send, sendprof), table.concat(deleted)
 end
 
@@ -979,7 +907,7 @@ local function netvars(net)
 			deletions[deleted:readnum()] = true
 		end
 		if coldloaded then
-			diff, diffprof = applyColdStore($1, $2)
+			diff, diffprof = applyDiff($1, $2)
 		end
 		local nextid = net("oh and a number")
 		Profiles = diffprof
@@ -1001,20 +929,7 @@ COM_AddCommand("lb_write_coldstore", function(player, filename)
 
 	cleanprofiles()
 
-	local store = {}
-	for map, checksums in pairs(LiveStore) do
-		store[map] = $ or {}
-		for checksum, records in pairs(checksums) do
-			store[map][checksum] = {}
-			for _, record in ipairs(records) do
-				insertOrReplace(store[map][checksum], record, -1)
-			end
-		end
-	end
-
-	squishStore(store)
-
-	local dat = writeColdStore(store, Profiles)
+	local dat = writeColdStore(RecByID, Profiles)
 	--[[
 	local f = open("coldstore.sav2", "wb")
 	f:write(dat)
@@ -1045,8 +960,9 @@ COM_AddCommand("lb_known_maps", function(player, map)
 
 	local known = {}
 
-	if LiveStore[mapnum] then
-		for checksum, records in pairs(LiveStore[mapnum]) do
+	refreshMapCache()
+	if RecByMap[mapnum] then
+		for checksum, records in pairs(RecByMap[mapnum]) do
 			known[checksum] = #records
 		end
 	end
@@ -1059,10 +975,8 @@ end, COM_LOCAL)
 
 COM_AddCommand("lb_statistics", function(player)
 	local numrecords = 0
-	for map, checksums in pairs(LiveStore) do
-		for checksum, records in pairs(checksums) do
-			numrecords = $ + #records
-		end
+	for _ in pairs(RecByID) do
+		numrecords = $ + 1
 	end
 	local prof = getProfile(player) and Profiles[getProfile(player)]
 	print(
@@ -1082,17 +996,18 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 		return
 	end
 	print("Converting "..filename.." to binary")
-	LiveStore = {}
+	RecByID = {}
+	RecByMap = nil
 	Profiles = {}
 	NextID = 1
 	for l in f:lines() do
 		local score, map, checksum = oldParseScore(l)
 		score.id = NextID
-		LiveStore[map] = $ or {}
-		LiveStore[map][checksum] = $ or {}
-		table.insert(LiveStore[map][checksum], score)
+		score._map = map
+		score._checksum = checksum
+		RecByID[NextID] = score
+		deleteGhost(NextID)
 		NextID = $ + 1
-		deleteGhost(score.id)
 	end
 	f:close()
 	Dirty = {}
