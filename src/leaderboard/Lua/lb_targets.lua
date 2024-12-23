@@ -33,6 +33,16 @@ addHook("MobjDeath", hitem, MT_CDUFO)
 return
 end -- if CODEBASE >= 220
 
+local function warpToSpawn(p)
+	local x, y = spawnpoint.x<<FRACBITS, spawnpoint.y<<FRACBITS
+	local sec = R_PointInSubsector(x, y).sector
+	local floorz = sec.floorheight
+	if sec.f_slope then floorz = P_GetZAt(sec.f_slope, x, y) end
+	P_SetOrigin(p.mo, x, y, floorz + (spawnpoint.options>>4)*FRACUNIT + (p.kartstuff[k_respawn] and 128*mapobjectscale))
+	p.mo.angle = FixedAngle(spawnpoint.angle*FRACUNIT)
+	COM_BufInsertText(p, "resetcamera")
+end
+
 addHook("PlayerSpawn", function(p)
 	if not LB_IsRunning() or gametype ~= GT_MATCH then
 		if not leveltime then hud.enable("gametypeinfo") end
@@ -40,19 +50,13 @@ addHook("PlayerSpawn", function(p)
 	end
 	hud.disable("gametypeinfo")
 
-	if spawnpoint then
-		if p.spectator then return end
-		local x, y = spawnpoint.x<<FRACBITS, spawnpoint.y<<FRACBITS
-		local sec = R_PointInSubsector(x, y).sector
-		local floorz = sec.floorheight
-		if sec.f_slope then floorz = P_GetZAt(sec.f_slope, x, y) end
-		P_SetOrigin(p.mo, x, y, floorz + (spawnpoint.options>>4)*FRACUNIT + (p.kartstuff[k_respawn] and 128*mapobjectscale))
-		p.mo.angle = FixedAngle(spawnpoint.angle*FRACUNIT)
-		COM_BufInsertText(p, "resetcamera")
+	if spawnpoint and not p.spectator then
+		warpToSpawn(p)
 	end
 end)
 
 addHook("MapLoad", function()
+	if not LB_IsRunning() or gametype ~= GT_MATCH then return end
 	targetlist = {}
 	for mt in mapthings.iterate do
 		if mt.type == 2000 then
@@ -80,8 +84,11 @@ addHook("MapLoad", function()
 	-- otherwise pick the first match start
 	spawnpoint = spawnpoint or dmstart
 
-	for p in players.iterate do
-		if not p.spectator then p.playerstate = PST_REBORN end
+	hud.disable("gametypeinfo") -- bruh
+	if spawnpoint then
+		for p in players.iterate do
+			if not p.spectator then warpToSpawn(p) end
+		end
 	end
 end)
 
