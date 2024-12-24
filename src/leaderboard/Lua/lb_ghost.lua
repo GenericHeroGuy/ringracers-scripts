@@ -1017,7 +1017,7 @@ addHook("MapChange", reset)
 if RINGS then
 addHook("GameQuit", reset)
 else -- sigh...
-addHook("PlayerJoin", function(p) if p == #consoleplayer then reset() end end)
+addHook("PlayerJoin", function(p) if consoleplayer and p == #consoleplayer then reset() end end)
 end
 
 local function SpawnDriftSparks(r, direction)
