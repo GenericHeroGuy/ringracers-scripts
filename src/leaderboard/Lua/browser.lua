@@ -19,6 +19,7 @@ local getThrowDir = lb_throw_dir
 local getPortrait = lb_get_portrait
 local GametypeForMap = lb_gametype_for_map
 local NextGametype = lb_next_gametype
+local mapnumFromExtended = lb_mapnum_from_extended
 
 -- lb_store.lua
 local GetMapRecords = lb_get_map_records
@@ -97,12 +98,13 @@ end
 local function loadMaps()
 	maps = {}
 	local hell = {}
-	for i = 0, #mapheaderinfo - 1 do
-		local gtab, gti = GametypeForMap(i)
+	for i = 1, #mapheaderinfo do
+		local mapname = G_BuildMapName(i)
+		local gtab, gti = GametypeForMap(mapname)
 		if gtab and gtab.enabled then
 			local t = mapheaderinfo[i].menuflags & LF2_HIDEINMENU and hell or maps
 			if not t[gti] then t[gti] = {} end
-			table.insert(t[gti], i)
+			table.insert(t[gti], mapname)
 		end
 	end
 
@@ -128,7 +130,7 @@ local scoresY =  ttlY + 16
 local sin = sin
 local function drawMapPatch(v, offset)
 	local scale = FRACUNIT / (abs(offset) + scalar) / (RINGS and 2 or 1)
-	local mapName = G_BuildMapName(getMap(offset))
+	local mapName = getMap(offset)
 	local patchName = mapName.."P"
 	local mapp = v.patchExists(patchName) and v.cachePatch(patchName) or v.cachePatch("BLANKLVL")
 
@@ -177,7 +179,7 @@ local function drawMapBorder(v)
 end
 
 local function drawMapStrings(v)
-	local map = mapheaderinfo[getMap()]
+	local map = mapheaderinfo[mapnumFromExtended(getMap())]
 	local titleWidth = v.stringWidth(map.lvlttl)
 
 	-- title
@@ -490,22 +492,23 @@ rawset(_G, "DrawBrowser", drawBrowser)
 local function initBrowser(modeSep)
 	if not maps then loadMaps() end
 
+	local gamemapname = G_BuildMapName(gamemap)
 	ModeSep = modeSep
-	gttable, gtselect = GametypeForMap(gamemap)
+	gttable, gtselect = GametypeForMap(gamemapname)
 	if not gttable.enabled then
 		gttable, gtselect = NextGametype($2)
 	end
 
 	-- set mapIndex to current map
 	for i, m in ipairs(maps[gtselect]) do
-		if m == gamemap then
+		if m == gamemapname then
 			mapIndex = i
 			break
 		end
 	end
 
 	-- initialize MapRecords
-	MapRecords = GetMapRecords(gamemap, ModeSep)
+	MapRecords = GetMapRecords(gamemapname, ModeSep)
 
 	scrollPos = 1
 	updateModes()
@@ -559,7 +562,7 @@ local function controller(player)
 			S_StartSound(nil, sfx_pop)
 			return true
 		elseif cmd.buttons & BT_ACCELERATE then
-			COM_BufInsertText(player, "changelevel "..G_BuildMapName(getMap()))
+			COM_BufInsertText(player, "changelevel "..getMap())
 			return true
 		elseif cmd.buttons & BT_ATTACK then
 			COM_BufInsertText(player, "lb_encore")

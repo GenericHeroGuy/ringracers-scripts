@@ -130,8 +130,8 @@ gametype_t("Race",   GT_RACE,  TOL_RACE|TOL_SP,    V_SKYMAP, 214, "K_ISSHOE", 6*
 gametype_t("Battle", GT_MATCH, TOL_MATCH|TOL_COOP, V_REDMAP, 126, "K_ISPOGO", 6*TICRATE + 3*TICRATE/4)
 end
 
-rawset(_G, "lb_gametype_for_map", function(mapnum)
-	local header = mapheaderinfo[mapnum]
+rawset(_G, "lb_gametype_for_map", function(mapname)
+	local header = mapheaderinfo[lb_mapnum_from_extended(mapname)]
 	if not header then return end
 	local tol = header.typeoflevel
 	for i, gtab in ipairs(GAMETYPES) do
@@ -188,8 +188,8 @@ end
 rawset(_G, "lb_djb2", djb2)
 
 -- Produce a checksum by using the maps title, subtitle and zone
-rawset(_G, "lb_map_checksum", function(mapnum)
-	local mh = mapheaderinfo[mapnum]
+rawset(_G, "lb_map_checksum", function(mapname)
+	local mh = mapheaderinfo[lb_mapnum_from_extended(mapname)]
 	if not mh then
 		return nil
 	end
@@ -245,11 +245,37 @@ rawset(_G, "lb_mapnum_from_extended", function(map)
 	return mapnum, checksum
 end)
 
+rawset(_G, "lb_parse_mapname", function(str)
+	str = $:upper()
+	local checksum = str:find(":", 1, true)
+	if checksum then
+		checksum, str = str:sub(checksum+1), str:sub(1, checksum-1)
+		checksum = #$ == 4 and $:lower() or false
+	end
+
+	if tonumber(str) then
+		return G_BuildMapName(str), checksum
+	elseif not RINGS and not str:upper():match("MAP%w%w") then
+		for i = 1, #mapheaderinfo do
+			local map = mapheaderinfo[i]
+			if not map then continue end
+
+			local lvlttl = map.lvlttl..lb_ZoneAct(map)
+
+			if lvlttl:upper():find(str:upper()) then
+				return G_BuildMapName(i), checksum
+			end
+		end
+	else
+		return RINGS and G_BuildMapName(G_FindMap(str)) or str:upper(), checksum
+	end
+end)
+
 rawset(_G, "lb_mapname_and_checksum", function(map, checksum)
 	if RINGS then
-		return G_BuildMapName(map)
+		return map
 	else
-		return string.format("%s:%s", G_BuildMapName(map), checksum)
+		return ("%s:%s"):format(map, checksum)
 	end
 end)
 

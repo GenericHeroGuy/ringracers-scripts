@@ -247,7 +247,7 @@ local packets = {
 				return
 			end
 
-			local maprecords = GetMapRecords(gamemap, -1)
+			local maprecords = GetMapRecords(G_BuildMapName(gamemap), -1)
 			local ghostdata = StringWriter()
 			for mode, records in pairs(maprecords) do
 				for _, record in ipairs(records) do

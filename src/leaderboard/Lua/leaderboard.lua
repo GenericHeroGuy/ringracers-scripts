@@ -11,6 +11,7 @@ local mapChecksum = lb_map_checksum
 local score_t = lb_score_t
 local player_t = lb_player_t
 local mapnumFromExtended = lb_mapnum_from_extended
+local ParseMapname = lb_parse_mapname
 local StringReader = lb_string_reader
 local drawNum = lb_draw_num
 local getThrowDir = lb_throw_dir
@@ -325,13 +326,15 @@ local function initLeaderboard(player)
 	else
 		disable = disable or not canstart()
 	end
-	local gtab = GametypeForMap(gamemap)
+
+	local gamemapname = G_BuildMapName(gamemap)
+	local gtab = GametypeForMap(gamemapname)
 	disable = $ or not cv_enable.value or not (gtab and gtab.enabled)
 
 	-- if disabled by gametype, restart with the correct gametype
 	local gtdisable = not gtab or gametype ~= gtab.gametype
 	if RINGS and not disable and gtdisable then
-		nextMap = gamemap
+		nextMap = gamemapname
 	end
 	disable = $ or gtdisable
 
@@ -344,7 +347,7 @@ local function initLeaderboard(player)
 	player.afkTime = leveltime
 
 	if not (player.spectator or disable) then
-		MapRecords = GetMapRecords(gamemap, ST_SEP)
+		MapRecords = GetMapRecords(gamemapname, ST_SEP)
 	end
 
 	-- if combi is active, disable will be true for the first player but not the second
@@ -370,7 +373,7 @@ end
 
 COM_AddCommand("retry", function(player)
 	if doyoudare(player) and leveltime >= 20 then
-		nextMap = gamemap
+		nextMap = G_BuildMapName(gamemap)
 	end
 end)
 
@@ -432,10 +435,12 @@ COM_AddCommand("findmap", function(player, search)
 			lvltype = not (map.typeoflevel & RACETOL) and lvltype
 				or string.format("%s \x82%-2d\x80", lvltype, map.numlaps)
 
+			local mapname = G_BuildMapName(i)
+
 			print(string.format(
 				RINGS and "%28s%s%s %-9s %s %s" or "%s%s (#%s) %-9s %-30s - %s\t%s",
-				G_BuildMapName(i),
-				(player == server or IsPlayerAdmin(player)) and "\x86:"..mapChecksum(i).."\x80" or "",
+				mapname,
+				(player == server or IsPlayerAdmin(player)) and "\x86:"..mapChecksum(mapname).."\x80" or "",
 				RINGS and "" or i,
 				lvltype,
 				lvlttl,
@@ -469,29 +474,26 @@ local function modeToString(mode)
 	return modestr
 end
 
-COM_AddCommand("records", function(player, mapid)
-	local mapnum = gamemap
-	local checksum
-
-	if mapid then
-		mapnum, checksum = mapnumFromExtended(mapid)
-		if not mapnum then
-			print(string.format("Invalid map name: %s", mapid))
-			return
-		end
+COM_AddCommand("records", function(player, ...)
+	local mapname, checksum
+	if not ... then
+		mapname = G_BuildMapName(gamemap)
+	else
+		local search = table.concat({...}, " ")
+		mapname, checksum = ParseMapname(search)
 	end
 
-	local mapRecords = GetMapRecords(mapnum, ST_SEP, checksum or nil)
+	local mapRecords = GetMapRecords(mapname, ST_SEP, checksum or nil)
 	if next(mapRecords) == nil then
 		print(string.format(
 			checksum == false and "Invalid checksum for %s"
 			or "No records found for %s"..(not RINGS and checksum == nil and ", please provide a checksum (hint: lb_known_maps)" or ""),
-			mapid or G_BuildMapName()
+			mapname
 		))
 		return
 	end
 
-	local map = mapheaderinfo[mapnum]
+	local map = mapheaderinfo[mapnumFromExtended(mapname)]
 	if map then
 		print(string.format(
 			"\x83%s%8s",
@@ -549,45 +551,26 @@ COM_AddCommand("changelevel", function(player, ...)
 		return
 	end
 
-	local search = table.concat({...}, " ")
-	if search == "" then
+	if not ... then
 		CONS_Printf(player, ("Usage: changelevel %s or Map Name")
 		                    :format(RINGS and "RR_XYZ" or "MAPXX"))
 		                    -- look at this hipster syntax!
 		return
 	end
 
-	local mapnum = tonumber(search)
-	if mapnum ~= nil then
-		-- based numeric ID user
-	elseif not RINGS and search:lower():sub(1, 3) ~= "map" then --don´t need to search stuff if someone uses MAPXX with this
-		for i = 1, #mapheaderinfo do
-			local map = mapheaderinfo[i]
-			if not map then continue end
+	local search = table.concat({...}, " ")
+	local mapname = ParseMapname(search)
 
-			local lvlttl = map.lvlttl..zoneAct(map)
-
-			if lvlttl:lower():find(search:lower()) then
-				mapnum = i
-				break
-			end
-		end
-	else
-		-- check map title AND lumpname in RR
-		mapnum = RINGS and G_FindMap(search) or mapnumFromExtended(search)
-	end
-
-	if not mapnum or mapnum < 1 then
+	if not mapname then
 		CONS_Printf(player, ("Invalid map name: %s"):format(search))
 		return
 	end
-
-	if mapheaderinfo[mapnum] == nil then
+	if not mapheaderinfo[mapnumFromExtended(mapname)] then
 		CONS_Printf(player, ("Map doesn't exist: %s"):format(search))
 		return
 	end
 
-	local gtab = GametypeForMap(mapnum)
+	local gtab = GametypeForMap(mapname)
 	if not gtab then
 		CONS_Printf(player, ("Incompatible gametype: %s"):format(search))
 		return
@@ -596,7 +579,7 @@ COM_AddCommand("changelevel", function(player, ...)
 		return
 	end
 
-	nextMap = mapnum
+	nextMap = mapname
 end)
 
 COM_AddCommand("lb_encore", function(player)
@@ -730,7 +713,7 @@ COM_AddCommand("rival", function(player, rival, page)
 
 			print(string.format(
 				"%s\t%s\t%s%8s\t\x80%s",
-				G_BuildMapName(score.map),
+				score.map,
 				ticsToTime(score.rival.time),
 				color or "",
 				diff ~= nil and sym[diff<0] + ticsToTime(abs(diff)) or ticsToTime(0, true),
@@ -765,7 +748,7 @@ local function getSourceRecords(from)
 		ids = { [ids.id] = true }
 	else
 		-- all records from a map
-		map, checksum = mapnumFromExtended(from)
+		map, checksum = ParseMapname(from)
 
 		if not map then
 			return nil, string.format("error: invalid map %s", from:upper())
@@ -800,7 +783,7 @@ COM_AddCommand("lb_move", function(player, from, to)
 	local sourcemap, sourcesum, sourceids = getSourceRecords(from)
 	if not sourcemap then return CONS_Printf(player, sourcesum) end
 
-	local targetmap, targetsum = mapnumFromExtended(to)
+	local targetmap, targetsum = ParseMapname(to)
 	if not targetmap then
 		CONS_Printf(player, string.format("error: invalid map %s", to:upper()))
 		return
@@ -1511,7 +1494,7 @@ local function saveTime(player)
 	end
 
 	-- Save the record
-	SaveRecord(newscore, gamemap, ST_SEP, ghosts)
+	SaveRecord(newscore, G_BuildMapName(gamemap), ST_SEP, ghosts)
 
 	-- Set players text flash and play chime sfx
 	S_StartSound(nil, sfx_token)
@@ -1520,7 +1503,7 @@ local function saveTime(player)
 	FlashVFlags = YellowFlash
 
 	-- Reload the MapRecords
-	MapRecords = GetMapRecords(gamemap, ST_SEP)
+	MapRecords = GetMapRecords(G_BuildMapName(gamemap), ST_SEP)
 
 	-- Set the updated ScoreTable
 	ScoreTable = MapRecords[ST_SEP & Flags]
@@ -1577,19 +1560,20 @@ end
 
 local function changeMap()
 	local gtab = GametypeForMap(nextMap)
+	local mapnum = mapnumFromExtended(nextMap)
 	if RINGS and gtab.gametype == GT_SPECIAL then
-		if nextMap == gamemap and gametype == gtab.gametype then
+		if mapnum == gamemap and gametype == gtab.gametype then
 			COM_BufInsertText(server, "restartlevel")
 		elseif gamestate ~= GS_LEVEL then
 			-- great... can't use G_SetCustomExitVars in intermission
 			-- if we're not in GT_SPECIAL we'll have to go through some gametype switching
-			COM_BufInsertText(server, (gametype == GT_SPECIAL and "map %d" or "map %d -g Race -f"):format(nextMap))
+			COM_BufInsertText(server, (gametype == GT_SPECIAL and "map %d" or "map %d -g Race -f"):format(mapnum))
 		else
-			G_SetCustomExitVars(nextMap, 2)
+			G_SetCustomExitVars(mapnum, 2)
 			COM_BufInsertText(server, "exitlevel")
 		end
 	else
-		COM_BufInsertText(server, ("map %d -g %d"):format(nextMap, gtab.gametype))
+		COM_BufInsertText(server, ("map %d -g %d"):format(mapnum, gtab.gametype))
 	end
 	nextMap = nil
 end
@@ -1764,7 +1748,7 @@ local function think()
 	end
 
 	if not MapRecords then -- mid-game join
-		MapRecords = GetMapRecords(gamemap, ST_SEP)
+		MapRecords = GetMapRecords(G_BuildMapName(gamemap), ST_SEP)
 	end
 	ScoreTable = MapRecords[ST_SEP & Flags]
 

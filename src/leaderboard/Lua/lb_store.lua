@@ -8,7 +8,7 @@ local lbComp = lb_comp
 local score_t = lb_score_t
 local player_t = lb_player_t
 local mapChecksum = lb_map_checksum
-local mapnumFromExtended = lb_mapnum_from_extended
+local ParseMapname = lb_parse_mapname
 local ticsToTime = lb_TicsToTime
 local StringReader = lb_string_reader
 local StringWriter = lb_string_writer
@@ -185,7 +185,7 @@ local function writeMapStore(f, store)
 	local mapstore = makeMapCache(store)
 	writeCount(f, mapstore)
 	for map, checksums in pairs(mapstore) do
-		f:writestr(G_BuildMapName(map))
+		f:writestr(map)
 		writeCount(f, checksums)
 		for checksum, records in pairs(checksums) do
 			f:write16(tonumber(checksum, 16))
@@ -657,14 +657,14 @@ end
 local function loadMapStore(f, version)
 	local store = {}
 	for _ = 1, f:readnum() do
-		local mapnum = mapnumFromExtended(f:readstr()) -- TODO the root of all evil
+		local mapname = f:readstr()
 		local numchecksums = f:readnum()
 		for i = 1, numchecksums do
 			local checksum = ("%04x"):format(f:read16())
 			local numrecords = f:readnum()
 			for j = 1, numrecords do
 				local score = parseScoreBinary(f, version)
-				score._map = mapnum
+				score._map = mapname
 				score._checksum = checksum
 				store[score.id] = score
 			end
@@ -949,11 +949,11 @@ COM_AddCommand("lb_write_coldstore", function(player, filename)
 end, COM_LOCAL)
 
 COM_AddCommand("lb_known_maps", function(player, map)
-	local mapnum = gamemap
+	local mapname = G_BuildMapName(gamemap)
 	if map then
-		mapnum = mapnumFromExtended(map)
-		if not mapnum then
-			print(string.format("invalid map '%s'", map))
+		mapname = ParseMapname(map)
+		if not mapname then
+			print(("invalid map '%s'"):format(map))
 			return
 		end
 	end
@@ -961,15 +961,15 @@ COM_AddCommand("lb_known_maps", function(player, map)
 	local known = {}
 
 	refreshMapCache()
-	if RecByMap[mapnum] then
-		for checksum, records in pairs(RecByMap[mapnum]) do
+	if RecByMap[mapname] then
+		for checksum, records in pairs(RecByMap[mapname]) do
 			known[checksum] = #records
 		end
 	end
 
 	print("Map	Chck	Records")
 	for checksum, count in pairs(known) do
-		print(string.format("%s	%s	%d", G_BuildMapName(mapnum), checksum, count))
+		print(string.format("%s	%s	%d", mapname, checksum, count))
 	end
 end, COM_LOCAL)
 
@@ -1003,7 +1003,7 @@ COM_AddCommand("lb_convert_to_binary", function(player, filename)
 	for l in f:lines() do
 		local score, map, checksum = oldParseScore(l)
 		score.id = NextID
-		score._map = map
+		score._map = G_BuildMapName(map)
 		score._checksum = checksum
 		RecByID[NextID] = score
 		deleteGhost(NextID)
