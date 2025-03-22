@@ -202,6 +202,7 @@ async def main(args):
 
 		found = False
 		for name in sorted(glob(args.basepath + line, recursive=True)):
+			name.replace("\\", "/")
 			found = True
 			if not os.path.isdir(name):
 				infiles[name] = infiles.get(name, 0) + 1
